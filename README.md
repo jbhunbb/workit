@@ -17,7 +17,9 @@
 - 미등록 context 삭제 시 `~/.kube/config`에서도 자동 제거
 
 ### 계정 정보
-- 비밀번호, API 키, 토큰 등 계정 정보 로컬 저장 및 관리
+- 비밀번호, API 키, 토큰 등 계정 정보 관리
+- 소스 코드 외부(`~/.workit/accounts/`)에 저장 — git에 노출되지 않음
+- 파일 권한 600 자동 설정
 
 ## 설치 및 실행
 
@@ -52,7 +54,7 @@ export KUBECONFIG=$(find ~/.kube/configs -type f | tr '\n' ':')
 | SSH 설정 | `~/.ssh/config` (적용 시 생성) |
 | Kubernetes 메타데이터 | `workit/data/kube/contexts.json` |
 | Kubernetes context 파일 | `~/.kube/configs/{context}.yaml` |
-| 계정 정보 | `workit/data/accounts.json` |
+| 계정 정보 | `~/.workit/accounts/accounts.json` (권한 600) |
 
 ## 기술 스택
 

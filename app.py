@@ -10,7 +10,7 @@ import yaml, json, os, sys, shutil, uuid
 BASE_DIR         = Path(__file__).parent
 DATA_DIR         = BASE_DIR / "data"
 SSH_YAML         = DATA_DIR / "ssh" / "conn_info.yaml"
-ACCTS_FILE       = DATA_DIR / "accounts.json"
+ACCTS_FILE       = Path.home() / ".workit" / "accounts" / "accounts.json"
 SSH_CONFIG       = Path.home() / ".ssh" / "config"
 KEYS_ROOT        = Path.home() / ".ssh" / "keys"
 ENV_ORDER        = ["dev", "test", "stg", "prd"]
@@ -40,8 +40,16 @@ def _init():
     (DATA_DIR / "ssh").mkdir(parents=True, exist_ok=True)
     if not SSH_YAML.exists():
         SSH_YAML.write_text(_DEFAULT_SSH_YAML)
-    if not ACCTS_FILE.exists():
+    # Accounts: stored outside repo at ~/.workit/accounts/
+    ACCTS_FILE.parent.mkdir(parents=True, exist_ok=True)
+    old_accts = DATA_DIR / "accounts.json"
+    if old_accts.exists() and not ACCTS_FILE.exists():
+        import shutil as _shutil
+        _shutil.copy2(str(old_accts), str(ACCTS_FILE))
+        old_accts.unlink()
+    elif not ACCTS_FILE.exists():
         ACCTS_FILE.write_text('{"accounts": []}')
+    ACCTS_FILE.chmod(0o600)
     (DATA_DIR / "kube").mkdir(parents=True, exist_ok=True)
     if not KUBE_JSON.exists():
         KUBE_JSON.write_text('{"contexts": []}')

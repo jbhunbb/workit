@@ -1581,13 +1581,14 @@ const GUIDES = {
     html: `
       <div class="guide-section">
         <p class="guide-section-title">저장 위치</p>
-        <div class="guide-path"><code>workit/data/accounts.json</code><span>계정 정보</span></div>
+        <div class="guide-path"><code>~/.workit/accounts/accounts.json</code><span>계정 정보 (소스 외부)</span></div>
       </div>
       <div class="guide-section">
         <p class="guide-section-title">동작 방식</p>
-        <div class="guide-step"><div class="guide-step-num">1</div><div class="guide-step-text">계정 추가 시 <code>accounts.json</code>에 저장됩니다.</div></div>
-        <div class="guide-step"><div class="guide-step-num">2</div><div class="guide-step-text">카테고리(DB, Server, API, Service 등)로 분류하고 필터링할 수 있습니다.</div></div>
-        <div class="guide-step"><div class="guide-step-num">3</div><div class="guide-step-text">비밀번호 필드는 <code>•••</code>로 가려지며 눈 아이콘 또는 복사 버튼으로 확인할 수 있습니다.</div></div>
+        <div class="guide-step"><div class="guide-step-num">1</div><div class="guide-step-text">계정 정보는 소스 코드 외부 <code>~/.workit/accounts/</code>에 저장됩니다. git에 절대 포함되지 않습니다.</div></div>
+        <div class="guide-step"><div class="guide-step-num">2</div><div class="guide-step-text">파일 권한은 <code>600</code>으로 자동 설정됩니다 (본인만 읽기 가능).</div></div>
+        <div class="guide-step"><div class="guide-step-num">3</div><div class="guide-step-text">카테고리(DB, Server, API, Service 등)로 분류하고 필터링할 수 있습니다.</div></div>
+        <div class="guide-step"><div class="guide-step-num">4</div><div class="guide-step-text">비밀번호 필드는 <code>•••</code>로 가려지며 눈 아이콘 또는 복사 버튼으로 확인할 수 있습니다.</div></div>
       </div>
       <div class="guide-note">⚠️ 로컬 파일에 <strong>평문</strong>으로 저장됩니다. 프로덕션 크리덴셜 등 민감한 정보는 별도 보안 저장소(Vault, 1Password 등)를 사용하세요.</div>
     `

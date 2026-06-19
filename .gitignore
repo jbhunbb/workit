@@ -5,6 +5,6 @@ __pycache__/
 logs/
 data/ssh/conn_info.yaml
 data/kube/contexts.json
-data/accounts.json
+# accounts moved to ~/.workit/accounts/ (outside repo)
 *.log
 .env
