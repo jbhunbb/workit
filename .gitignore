@@ -1,0 +1,10 @@
+__pycache__/
+*.pyc
+*.pyo
+.DS_Store
+logs/
+data/ssh/conn_info.yaml
+data/kube/contexts.json
+data/accounts.json
+*.log
+.env
