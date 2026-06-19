@@ -625,6 +625,26 @@ function envBadge(env) {
 // ═══════════════════════════════════════════════════════════
 let servers = [], aliases = [], selectedEnv = '', fwdOn = false, keyMode = 'file', editAlias = '';
 
+const sshDraft  = { deletes: new Set(), adds: [], edits: new Map() };
+const kubeDraft = { deletes: new Set(), adds: [], edits: new Map() };
+function sshDraftCount()  { return sshDraft.deletes.size + sshDraft.adds.length + sshDraft.edits.size; }
+function kubeDraftCount() { return kubeDraft.deletes.size + kubeDraft.adds.length + kubeDraft.edits.size; }
+
+function _updateSaveBtn(tab) {
+  const count = tab === 'ssh' ? sshDraftCount() : kubeDraftCount();
+  const btnId = tab === 'ssh' ? 'ssh-apply-btn' : 'kube-apply-btn';
+  const btn = document.getElementById(btnId);
+  if (!btn) return;
+  const svg = `<svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>`;
+  if (count > 0) {
+    btn.innerHTML = `${svg} 저장 <span class="inline-flex items-center justify-center w-4 h-4 rounded-full text-[10px] font-bold" style="background:rgba(255,255,255,0.35)">${count}</span>`;
+    btn.classList.add('!bg-amber-500','!border-amber-500','!text-white');
+  } else {
+    btn.innerHTML = `${svg} 저장`;
+    btn.classList.remove('!bg-amber-500','!border-amber-500','!text-white');
+  }
+}
+
 async function sshLoad() {
   try {
     const r = await fetch('/api/ssh/servers');
@@ -637,9 +657,27 @@ async function sshLoad() {
   }
 }
 
+function _sshDisplayList() {
+  const list = [];
+  for (const s of servers) {
+    if (sshDraft.edits.has(s.alias)) {
+      list.push({ ...s, ...sshDraft.edits.get(s.alias), alias: s.alias, _draftState: 'edit' });
+    } else if (sshDraft.deletes.has(s.alias)) {
+      list.push({ ...s, _draftState: 'delete' });
+    } else {
+      list.push({ ...s, _draftState: null });
+    }
+  }
+  for (const add of sshDraft.adds) {
+    list.push({ ...add, key_path: `~/.ssh/keys/${add.env}/${add.alias}.pem`, _draftState: 'add' });
+  }
+  return list;
+}
+
 function sshRender() {
   const el = document.getElementById('ssh-list');
-  if (!servers.length) {
+  const list = _sshDisplayList();
+  if (!list.length) {
     el.innerHTML = `<div class="flex flex-col items-center justify-center py-24 text-slate-400">
       <svg class="w-10 h-10 mb-3 opacity-30" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M5 12h14M12 5l7 7-7 7"/></svg>
       <p class="text-sm font-medium">서버가 없습니다</p>
@@ -648,15 +686,15 @@ function sshRender() {
     return;
   }
   const byProject = {};
-  for (const s of servers) {
+  for (const s of list) {
     const proj = s.project || '미분류';
     (byProject[proj] = byProject[proj] || []).push(s);
   }
-  el.innerHTML = Object.entries(byProject).map(([proj, list]) => `
+  el.innerHTML = Object.entries(byProject).map(([proj, grp]) => `
     <div class="bg-white rounded-2xl border border-slate-200 overflow-hidden mb-4 shadow-sm">
       <div class="px-5 py-2.5 proj-hdr flex items-center gap-2">
         <span class="text-white font-bold text-xs uppercase tracking-widest">${esc(proj)}</span>
-        <span class="bg-white/20 text-white text-[11px] px-1.5 py-0.5 rounded-full font-semibold">${list.length}</span>
+        <span class="bg-white/20 text-white text-[11px] px-1.5 py-0.5 rounded-full font-semibold">${grp.length}</span>
       </div>
       <table class="w-full text-sm">
         <thead><tr class="text-[11px] text-slate-400 uppercase tracking-wider border-b border-slate-100">
@@ -668,35 +706,49 @@ function sshRender() {
           <th class="px-4 py-2.5 text-center font-semibold">Key</th>
           <th class="px-4 py-2.5 w-16"></th>
         </tr></thead>
-        <tbody class="divide-y divide-slate-50">${list.map(sshRow).join('')}</tbody>
+        <tbody class="divide-y divide-slate-50">${grp.map(sshRow).join('')}</tbody>
       </table>
     </div>`).join('');
 }
 
 function sshRow(s) {
-  const key = s.key_exists
+  const isDelete = s._draftState === 'delete';
+  const isAdd    = s._draftState === 'add';
+  const isEdit   = s._draftState === 'edit';
+  const badge = isDelete
+    ? `<span class="ml-1.5 text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-rose-100 text-rose-600">삭제 예정</span>`
+    : isAdd
+    ? `<span class="ml-1.5 text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-emerald-100 text-emerald-700">신규</span>`
+    : isEdit
+    ? `<span class="ml-1.5 text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-600">수정됨</span>`
+    : '';
+  const rowCls = isDelete ? 'opacity-50 line-through' : '';
+  const keyIco = s.key_exists
     ? `<svg class="w-4 h-4 text-emerald-500" fill="none" stroke="currentColor" viewBox="0 0 24 24" title="${esc(s.key_path)}"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg>`
     : `<svg class="w-4 h-4 text-rose-400" fill="none" stroke="currentColor" viewBox="0 0 24 24" title="${esc(s.key_path)}"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>`;
-  return `<tr>
+  const actions = isDelete
+    ? `<button onclick="sshUndoDel('${eA(s.alias)}')" title="되돌리기" class="text-rose-400 hover:text-rose-600 text-xs font-semibold transition-colors">취소</button>`
+    : isAdd
+    ? `<button onclick="sshDel('${eA(s.alias)}')" title="추가 취소" class="text-slate-300 hover:text-rose-500 transition-colors">
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
+       </button>`
+    : `<button onclick="openEditDrawer('${eA(s.alias)}')" title="편집" class="text-slate-300 hover:text-sky-500 transition-colors">
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"/></svg>
+       </button>
+       <button onclick="kmOpen('${eA(s.alias)}','${eA(s.key_path || '')}')" title="키 설정" class="text-slate-300 hover:text-indigo-500 transition-colors">
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z"/></svg>
+       </button>
+       <button onclick="sshDel('${eA(s.alias)}')" title="삭제" class="text-slate-300 hover:text-rose-500 transition-colors">
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
+       </button>`;
+  return `<tr class="${rowCls}">
     <td class="px-4 py-3">${envBadge(s.env)}</td>
-    <td class="px-4 py-3 font-mono font-semibold text-slate-800 text-[12.5px]">${esc(s.alias)}</td>
+    <td class="px-4 py-3 font-mono font-semibold text-slate-800 text-[12.5px]">${esc(s.alias)}${badge}</td>
     <td class="px-4 py-3 text-slate-600 text-[13px]">${esc(s.hostname)}</td>
     <td class="px-4 py-3 text-slate-500 text-[13px]">${esc(s.user)}</td>
     <td class="px-4 py-3 text-slate-400 text-xs max-w-[160px] truncate" title="${esc(s.description)}">${esc(s.description) || '—'}</td>
-    <td class="px-4 py-3"><div class="flex justify-center">${key}</div></td>
-    <td class="px-4 py-3">
-      <div class="flex justify-center items-center gap-2.5">
-        <button onclick="openEditDrawer('${eA(s.alias)}')" title="편집" class="text-slate-300 hover:text-sky-500 transition-colors">
-          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"/></svg>
-        </button>
-        <button onclick="kmOpen('${eA(s.alias)}','${eA(s.key_path)}')" title="키 설정" class="text-slate-300 hover:text-indigo-500 transition-colors">
-          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z"/></svg>
-        </button>
-        <button onclick="sshDel('${eA(s.alias)}')" title="삭제" class="text-slate-300 hover:text-rose-500 transition-colors">
-          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
-        </button>
-      </div>
-    </td>
+    <td class="px-4 py-3"><div class="flex justify-center">${isAdd ? '' : keyIco}</div></td>
+    <td class="px-4 py-3"><div class="flex justify-center items-center gap-2.5">${actions}</div></td>
   </tr>`;
 }
 
@@ -718,7 +770,7 @@ function openDrawer() {
   }
 }
 function openEditDrawer(alias) {
-  const s = servers.find(x => x.alias === alias);
+  const s = sshDraft.edits.get(alias) || servers.find(x => x.alias === alias);
   if (!s) return;
   editAlias = alias; drawerDirty = false;
   document.getElementById('drawer-title').textContent = '서버 편집';
@@ -774,39 +826,116 @@ function setKeyMode(m) {
   document.getElementById('tab-file').classList.toggle('active',m==='file');
   document.getElementById('tab-text').classList.toggle('active',m==='text');
 }
-async function submitForm(e) {
+function submitForm(e) {
   e.preventDefault();
-  if(!selectedEnv){toast('타입을 선택하세요',false);return;}
+  if (!selectedEnv) { toast('타입을 선택하세요', false); return; }
   const isEdit = !!editAlias;
-  const btn=document.getElementById('submit-btn'); btn.disabled=true; btn.textContent=isEdit?'수정 중...':'저장 중...';
-  const fd=new FormData(e.target);
-  if(keyMode==='text') fd.delete('key_file'); else fd.delete('key_text');
-  const url = isEdit ? `/api/ssh/servers/${editAlias}` : '/api/ssh/servers';
-  const method = isEdit ? 'PUT' : 'POST';
-  try {
-    const r=await fetch(url,{method,body:fd}), d=await r.json();
-    if(!r.ok) toast(d.error||'오류',false);
-    else {
-      toast(isEdit?`${d.alias} 저장됨`:`${d.alias} 추가됨`); e.target.reset();
-      dzReset('dz','dz-icon','dz-text'); setKeyMode('file');
-      selectedEnv=''; fwdOn=false;
-      document.getElementById('fwd-toggle').classList.remove('on');
-      document.getElementById('fwd-val').value='false';
-      document.querySelectorAll('.env-pill').forEach(el=>el.className='env-pill');
-      updatePreview(); _drawerForceClose(); await sshLoad();
-    }
-  } catch { toast('네트워크 오류',false); }
-  finally { btn.disabled=false; btn.textContent=isEdit?'저장':'추가'; }
+  const proj  = document.getElementById('f-project').value.trim();
+  const role  = document.getElementById('f-role').value.trim();
+  const alias = proj && selectedEnv && role ? `${proj}-${selectedEnv}-${role}` : (editAlias || '');
+  const keyFile = keyMode === 'file' ? (document.getElementById('f-keyfile').files?.[0] || null) : null;
+  const keyText = keyMode === 'text' ? (document.querySelector('textarea[name="key_text"]')?.value?.trim() || '') : '';
+  const entry = {
+    alias,
+    project:       proj,
+    env:           selectedEnv,
+    role:          role,
+    hostname:      document.querySelector('input[name="hostname"]').value.trim(),
+    user:          document.querySelector('input[name="user"]').value.trim(),
+    port:          parseInt(document.querySelector('input[name="port"]').value) || 22,
+    proxy_jump:    document.getElementById('f-proxy').value,
+    description:   document.getElementById('f-desc').value.trim(),
+    forward_agent: fwdOn,
+    key_mode:      keyMode,
+    key_file:      keyFile,
+    key_text:      keyText,
+    key_exists:    isEdit ? (servers.find(x => x.alias === editAlias)?.key_exists || false) : false,
+    key_path:      `~/.ssh/keys/${selectedEnv}/${alias}.pem`,
+  };
+  if (isEdit) {
+    sshDraft.edits.set(editAlias, entry);
+  } else {
+    const existingIdx = sshDraft.adds.findIndex(a => a.alias === alias);
+    if (existingIdx >= 0) sshDraft.adds[existingIdx] = entry;
+    else sshDraft.adds.push(entry);
+  }
+  toast(isEdit ? `${alias} 수정 예정 — 저장 버튼으로 확정하세요` : `${alias} 추가 예정 — 저장 버튼으로 확정하세요`);
+  e.target.reset();
+  dzReset('dz', 'dz-icon', 'dz-text'); setKeyMode('file');
+  selectedEnv = ''; fwdOn = false;
+  document.getElementById('fwd-toggle').classList.remove('on');
+  document.getElementById('fwd-val').value = 'false';
+  document.querySelectorAll('.env-pill').forEach(el => el.className = 'env-pill');
+  updatePreview(); _drawerForceClose();
+  _updateSaveBtn('ssh');
+  sshRender();
 }
-async function sshDel(alias) {
-  if(!confirm(`'${alias}' 삭제할까요?`)) return;
-  const r=await fetch(`/api/ssh/servers/${alias}`,{method:'DELETE'});
-  if(r.ok){toast(`${alias} 삭제됨`);await sshLoad();}else toast('삭제 실패',false);
+function sshDel(alias) {
+  const addIdx = sshDraft.adds.findIndex(a => a.alias === alias);
+  if (addIdx >= 0) {
+    sshDraft.adds.splice(addIdx, 1);
+    _updateSaveBtn('ssh'); sshRender(); return;
+  }
+  sshDraft.edits.delete(alias);
+  sshDraft.deletes.add(alias);
+  _updateSaveBtn('ssh'); sshRender();
+}
+function sshUndoDel(alias) {
+  sshDraft.deletes.delete(alias);
+  _updateSaveBtn('ssh'); sshRender();
 }
 async function sshApply() {
-  const btn=document.getElementById('ssh-apply-btn'); btn.disabled=true; btn.textContent='적용 중...';
-  try { const r=await fetch('/api/ssh/apply',{method:'POST'}),d=await r.json(); toast(d.ok?d.output:'적용 실패',d.ok); }
-  finally { btn.disabled=false; btn.innerHTML=`<svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg> 저장`; }
+  const btn = document.getElementById('ssh-apply-btn');
+  btn.disabled = true; btn.textContent = '저장 중...';
+  const total = sshDraftCount();
+  const errs = [];
+
+  // Process staged deletes
+  for (const alias of sshDraft.deletes) {
+    try {
+      const r = await fetch(`/api/ssh/servers/${alias}`, { method: 'DELETE' });
+      if (!r.ok) errs.push(`삭제 실패: ${alias}`);
+    } catch { errs.push(`오류: ${alias}`); }
+  }
+  // Process staged edits
+  for (const [alias, entry] of sshDraft.edits) {
+    const fd = new FormData();
+    fd.append('project', entry.project); fd.append('env', entry.env); fd.append('role', entry.role);
+    fd.append('hostname', entry.hostname); fd.append('user', entry.user); fd.append('port', entry.port);
+    fd.append('proxy_jump', entry.proxy_jump); fd.append('description', entry.description);
+    fd.append('forward_agent', entry.forward_agent ? 'true' : 'false');
+    if (entry.key_mode === 'file' && entry.key_file) fd.append('key_file', entry.key_file);
+    else if (entry.key_mode === 'text' && entry.key_text) fd.append('key_text', entry.key_text);
+    try {
+      const r = await fetch(`/api/ssh/servers/${alias}`, { method: 'PUT', body: fd });
+      if (!r.ok) { const d = await r.json(); errs.push(d.error || `수정 실패: ${alias}`); }
+    } catch { errs.push(`오류: ${alias}`); }
+  }
+  // Process staged adds
+  for (const entry of sshDraft.adds) {
+    const fd = new FormData();
+    fd.append('project', entry.project); fd.append('env', entry.env); fd.append('role', entry.role);
+    fd.append('hostname', entry.hostname); fd.append('user', entry.user); fd.append('port', entry.port);
+    fd.append('proxy_jump', entry.proxy_jump); fd.append('description', entry.description);
+    fd.append('forward_agent', entry.forward_agent ? 'true' : 'false');
+    if (entry.key_mode === 'file' && entry.key_file) fd.append('key_file', entry.key_file);
+    else if (entry.key_mode === 'text' && entry.key_text) fd.append('key_text', entry.key_text);
+    try {
+      const r = await fetch('/api/ssh/servers', { method: 'POST', body: fd });
+      if (!r.ok) { const d = await r.json(); errs.push(d.error || '추가 실패'); }
+    } catch { errs.push('추가 오류'); }
+  }
+  // Apply SSH config
+  try {
+    const r = await fetch('/api/ssh/apply', { method: 'POST' }), d = await r.json();
+    if (d.ok) { if (!errs.length) toast(total > 0 ? `${total}개 변경사항 저장됨` : d.output); }
+    else errs.push('SSH 설정 적용 실패');
+  } catch { errs.push('SSH 설정 적용 실패'); }
+
+  sshDraft.deletes.clear(); sshDraft.edits.clear(); sshDraft.adds.length = 0;
+  errs.forEach(e => toast(e, false));
+  btn.disabled = false; _updateSaveBtn('ssh');
+  await sshLoad();
 }
 
 // Key modal
@@ -966,9 +1095,27 @@ async function kubeLoad() {
   }
 }
 
+function _kubeDisplayList() {
+  const list = [];
+  for (const c of kubeContexts) {
+    if (kubeDraft.edits.has(c.id)) {
+      list.push({ ...c, ...kubeDraft.edits.get(c.id), id: c.id, _draftState: 'edit' });
+    } else if (kubeDraft.deletes.has(c.id)) {
+      list.push({ ...c, _draftState: 'delete' });
+    } else {
+      list.push({ ...c, _draftState: null });
+    }
+  }
+  for (const add of kubeDraft.adds) {
+    list.push({ ...add, id: add._draftId, _draftState: 'add' });
+  }
+  return list;
+}
+
 function kubeRender() {
   const el = document.getElementById('kube-list');
-  if (!kubeContexts.length) {
+  const allCtx = _kubeDisplayList();
+  if (!allCtx.length) {
     el.innerHTML = `<div class="flex flex-col items-center justify-center py-24 text-slate-400">
       <svg class="w-10 h-10 mb-3 opacity-30" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M5 12h14M12 5l7 7-7 7"/></svg>
       <p class="text-sm font-medium">Context가 없습니다</p>
@@ -976,8 +1123,8 @@ function kubeRender() {
     </div>`;
     return;
   }
-  const reg   = kubeContexts.filter(c => c.project);
-  const unreg = kubeContexts.filter(c => !c.project);
+  const reg   = allCtx.filter(c => c.project);
+  const unreg = allCtx.filter(c => !c.project);
   const byProject = {};
   for (const c of reg) (byProject[c.project] = byProject[c.project] || []).push(c);
   let html = '';
@@ -1026,45 +1173,59 @@ function kubeRender() {
 
 function kubeRegRow(c) {
   const serverShort = c.server ? c.server.replace(/^https?:\/\//, '') : '—';
-  return `<tr>
+  const isDelete = c._draftState === 'delete';
+  const isAdd    = c._draftState === 'add';
+  const isEdit   = c._draftState === 'edit';
+  const badge = isDelete
+    ? `<span class="ml-1.5 text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-rose-100 text-rose-600">삭제 예정</span>`
+    : isAdd
+    ? `<span class="ml-1.5 text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-emerald-100 text-emerald-700">신규</span>`
+    : isEdit
+    ? `<span class="ml-1.5 text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-600">수정됨</span>`
+    : '';
+  const rowCls = isDelete ? 'opacity-50' : '';
+  const actions = isDelete
+    ? `<button onclick="kubeUndoDel('${eA(c.id)}')" class="text-rose-400 hover:text-rose-600 text-xs font-semibold transition-colors">취소</button>`
+    : `<button onclick="kubeOpenEdit('${eA(c.id)}')" title="편집" class="text-slate-300 hover:text-sky-500 transition-colors">
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"/></svg>
+       </button>
+       <button onclick="kubeDel('${eA(c.id)}')" title="삭제" class="text-slate-300 hover:text-rose-500 transition-colors">
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
+       </button>`;
+  return `<tr class="${rowCls}">
     <td class="px-4 py-3">${envBadge(c.env)}</td>
-    <td class="px-4 py-3 font-mono font-semibold text-slate-800 text-[12.5px]">${esc(c.context_name)}</td>
+    <td class="px-4 py-3 font-mono font-semibold text-slate-800 text-[12.5px]">${esc(c.context_name)}${badge}</td>
     <td class="px-4 py-3 text-slate-600 text-[13px]">${esc(c.cluster_name) || '—'}</td>
     <td class="px-4 py-3 text-slate-500 text-xs font-mono">${esc(serverShort)}</td>
     <td class="px-4 py-3 text-slate-400 text-xs">${esc(c.namespace) || '—'}</td>
     <td class="px-4 py-3 text-slate-400 text-xs max-w-[140px] truncate" title="${esc(c.description)}">${esc(c.description) || '—'}</td>
-    <td class="px-4 py-3">
-      <div class="flex items-center gap-2.5">
-        <button onclick="kubeOpenEdit('${eA(c.id)}')" title="편집" class="text-slate-300 hover:text-sky-500 transition-colors">
-          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"/></svg>
-        </button>
-        <button onclick="kubeDel('${eA(c.id)}')" title="삭제" class="text-slate-300 hover:text-rose-500 transition-colors">
-          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
-        </button>
-      </div>
-    </td>
+    <td class="px-4 py-3"><div class="flex items-center gap-2.5">${actions}</div></td>
   </tr>`;
 }
 
 function kubeUnregRow(c) {
   const serverShort = c.server ? c.server.replace(/^https?:\/\//, '') : '—';
-  return `<tr class="bg-amber-50/20 hover:bg-amber-50/40 transition-colors">
-    <td class="px-4 py-3 font-mono font-semibold text-slate-700 text-[12.5px]">${esc(c.context_name)}</td>
+  const isDelete = c._draftState === 'delete';
+  const badge = isDelete
+    ? `<span class="ml-1.5 text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-rose-100 text-rose-600">삭제 예정</span>`
+    : '';
+  const rowCls = isDelete ? 'opacity-50' : 'bg-amber-50/20 hover:bg-amber-50/40 transition-colors';
+  const actions = isDelete
+    ? `<button onclick="kubeUndoDel('${eA(c.id)}')" class="text-rose-400 hover:text-rose-600 text-xs font-semibold transition-colors">취소</button>`
+    : `<button onclick="kubeOpenEdit('${eA(c.id)}')"
+        class="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-semibold text-sky-600 bg-sky-50 hover:bg-sky-100 transition-colors border border-sky-200 whitespace-nowrap">
+        <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
+        등록
+       </button>
+       <button onclick="kubeDel('${eA(c.id)}')" title="삭제" class="text-slate-300 hover:text-rose-500 transition-colors">
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
+       </button>`;
+  return `<tr class="${rowCls}">
+    <td class="px-4 py-3 font-mono font-semibold text-slate-700 text-[12.5px]">${esc(c.context_name)}${badge}</td>
     <td class="px-4 py-3 text-slate-500 text-[13px]">${esc(c.cluster_name) || '—'}</td>
     <td class="px-4 py-3 text-slate-400 text-xs font-mono">${esc(serverShort)}</td>
     <td class="px-4 py-3 text-slate-400 text-[13px]">${esc(c.user_name) || '—'}</td>
-    <td class="px-4 py-3">
-      <div class="flex items-center justify-end gap-2">
-        <button onclick="kubeOpenEdit('${eA(c.id)}')"
-          class="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-semibold text-sky-600 bg-sky-50 hover:bg-sky-100 transition-colors border border-sky-200 whitespace-nowrap">
-          <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
-          등록
-        </button>
-        <button onclick="kubeDel('${eA(c.id)}')" title="삭제 (~/.kube/config에서도 제거)" class="text-slate-300 hover:text-rose-500 transition-colors">
-          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
-        </button>
-      </div>
-    </td>
+    <td class="px-4 py-3"><div class="flex items-center justify-end gap-2">${actions}</div></td>
   </tr>`;
 }
 
@@ -1081,8 +1242,23 @@ function kubeOpenModal() {
   document.getElementById('kube-modal').classList.add('open');
 }
 function kubeOpenEdit(id) {
-  const c = kubeContexts.find(x => x.id === id);
+  // Check draft adds first (id === _draftId), then draft edits merged with original, then kubeContexts
+  const addEntry = kubeDraft.adds.find(a => a._draftId === id);
+  if (addEntry) {
+    kubeEditId = id;
+    kubeParsed = [{ ...addEntry, _selected: true }];
+    kubeOrigParsed = JSON.parse(JSON.stringify(kubeParsed));
+    document.getElementById('kube-step-input').classList.add('hidden');
+    document.getElementById('kube-step-parsed').classList.remove('hidden');
+    document.getElementById('kube-modal-title').textContent = 'Context 편집 (신규)';
+    document.getElementById('kube-add-btn').textContent = '저장';
+    kubeRenderParsed();
+    document.getElementById('kube-modal').classList.add('open');
+    return;
+  }
+  let c = kubeContexts.find(x => x.id === id);
   if (!c) return;
+  if (kubeDraft.edits.has(id)) c = { ...c, ...kubeDraft.edits.get(id), id };
   kubeEditId = id;
   kubeParsed = [{ ...c, _selected: true }];
   kubeOrigParsed = JSON.parse(JSON.stringify(kubeParsed));
@@ -1235,72 +1411,96 @@ function kubeToggleSel(i) {
   document.getElementById(`kube-sel-lbl-${i}`).textContent = kubeParsed[i]._selected ? '추가' : '건너뜀';
 }
 
-async function kubeAddParsed() {
+function kubeAddParsed() {
   const selected = kubeParsed.filter(c => c._selected);
   if (!selected.length) { toast('저장할 context를 선택하세요', false); return; }
-  const btn = document.getElementById('kube-add-btn');
-  btn.disabled = true; btn.textContent = '저장 중...';
 
   if (kubeEditId) {
-    const origCtx = kubeContexts.find(x => x.id === kubeEditId);
-    const wasUnreg = origCtx && !origCtx.project;
-    const c = selected[0];
-    const payload = { ...c };
-    if (payload._cluster) payload._cluster = { ...payload._cluster, server: c.server };
-    try {
-      const r = await fetch(`/api/kube/contexts/${kubeEditId}`, {
-        method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload)
-      });
-      const d = await r.json();
-      if (r.ok) { toast(wasUnreg ? 'context 등록됨' : '저장됨'); kubeOrigParsed = null; _kubeForceClose(); await kubeLoad(); }
-      else toast(d.error || '오류', false);
-    } catch { toast('네트워크 오류', false); }
-    btn.disabled = false; btn.textContent = '저장';
-    return;
+    const addIdx = kubeDraft.adds.findIndex(a => a._draftId === kubeEditId);
+    if (addIdx >= 0) {
+      const c = selected[0];
+      kubeDraft.adds[addIdx] = { ...c, _draftId: kubeEditId };
+      delete kubeDraft.adds[addIdx]._selected;
+    } else {
+      const c = selected[0];
+      const entry = { ...c }; delete entry._selected;
+      kubeDraft.edits.set(kubeEditId, entry);
+    }
+    toast('수정 예정 — 저장 버튼으로 확정하세요');
+  } else {
+    for (const c of selected) {
+      const draftId = 'kadd_' + Date.now() + '_' + kubeDraft.adds.length;
+      const entry = { ...c, _draftId: draftId }; delete entry._selected;
+      kubeDraft.adds.push(entry);
+    }
+    toast(`${selected.length}개 추가 예정 — 저장 버튼으로 확정하세요`);
   }
 
-  let added = 0;
+  kubeOrigParsed = null; _kubeForceClose();
+  _updateSaveBtn('kube'); kubeRender();
+}
+
+function kubeDel(id) {
+  const addIdx = kubeDraft.adds.findIndex(a => a._draftId === id);
+  if (addIdx >= 0) {
+    kubeDraft.adds.splice(addIdx, 1);
+    _updateSaveBtn('kube'); kubeRender(); return;
+  }
+  kubeDraft.edits.delete(id);
+  kubeDraft.deletes.add(id);
+  _updateSaveBtn('kube'); kubeRender();
+}
+function kubeUndoDel(id) {
+  kubeDraft.deletes.delete(id);
+  _updateSaveBtn('kube'); kubeRender();
+}
+async function kubeApply() {
+  const total = kubeDraftCount();
+  const btn = document.getElementById('kube-apply-btn');
+  btn.disabled = true; btn.textContent = '저장 중...';
   const errs = [];
-  for (const c of selected) {
-    const payload = { ...c };
-    if (payload._cluster) payload._cluster = { ...payload._cluster, server: c.server };
+
+  // Process staged deletes
+  for (const id of kubeDraft.deletes) {
+    try {
+      const r = await fetch(`/api/kube/contexts/${id}`, { method: 'DELETE' });
+      if (!r.ok) errs.push('삭제 실패');
+    } catch { errs.push('네트워크 오류'); }
+  }
+  // Process staged edits
+  for (const [id, entry] of kubeDraft.edits) {
+    const payload = { ...entry }; delete payload._draftState; delete payload._selected;
+    if (payload._cluster) payload._cluster = { ...payload._cluster, server: entry.server };
+    try {
+      const r = await fetch(`/api/kube/contexts/${id}`, {
+        method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload)
+      });
+      if (!r.ok) { const d = await r.json(); errs.push(d.error || '수정 실패'); }
+    } catch { errs.push('네트워크 오류'); }
+  }
+  // Process staged adds
+  for (const entry of kubeDraft.adds) {
+    const payload = { ...entry }; delete payload._draftId; delete payload._draftState; delete payload._selected;
+    if (payload._cluster) payload._cluster = { ...payload._cluster, server: entry.server };
     try {
       const r = await fetch('/api/kube/contexts', {
         method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload)
       });
-      const d = await r.json();
-      if (r.ok) added++; else errs.push(d.error || '오류');
+      if (!r.ok) { const d = await r.json(); errs.push(d.error || '추가 실패'); }
     } catch { errs.push('네트워크 오류'); }
   }
-  btn.disabled = false; btn.textContent = '저장';
-  if (added > 0) { toast(`${added}개 context 저장됨`); kubeOrigParsed = null; _kubeForceClose(); await kubeLoad(); }
-  errs.forEach(e => toast(e, false));
-}
-
-async function kubeDel(id) {
-  const c = kubeContexts.find(x => x.id === id);
-  const isUnreg = c && !c.project;
-  const msg = isUnreg
-    ? `'${c?.context_name}' context를 삭제할까요?\n(~/.kube/config 에서도 제거됩니다)`
-    : `'${c?.context_name}' context를 삭제할까요?`;
-  if (!confirm(msg)) return;
-  const r = await fetch(`/api/kube/contexts/${id}`, { method: 'DELETE' });
-  if (r.ok) { toast('삭제됨'); await kubeLoad(); } else toast('삭제 실패', false);
-}
-
-async function kubeApply() {
-  if (!kubeContexts.length) { toast('저장할 context가 없습니다', false); return; }
-  const btn = document.getElementById('kube-apply-btn');
-  btn.disabled = true; btn.textContent = '저장 중...';
+  // Write kube config files
   try {
     const r = await fetch('/api/kube/apply', { method: 'POST' });
     const d = await r.json();
-    toast(d.ok ? d.output : '저장 실패', d.ok);
-  } catch { toast('네트워크 오류', false); }
-  finally {
-    btn.disabled = false;
-    btn.innerHTML = `<svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg> 저장`;
-  }
+    if (!d.ok) errs.push('파일 저장 실패');
+    else if (!errs.length) toast(total > 0 ? `${total}개 변경사항 저장됨` : d.output);
+  } catch { errs.push('파일 저장 실패'); }
+
+  kubeDraft.deletes.clear(); kubeDraft.edits.clear(); kubeDraft.adds.length = 0;
+  errs.forEach(e => toast(e, false));
+  btn.disabled = false; _updateSaveBtn('kube');
+  await kubeLoad();
 }
 
 let _unsavedCb = null;
