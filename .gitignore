@@ -8,3 +8,9 @@ data/kube/contexts.json
 # accounts moved to ~/.workit/accounts/ (outside repo)
 *.log
 .env
+
+# Mac app build artifacts
+.venv/
+build/
+dist/
+*.spec

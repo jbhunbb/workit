@@ -1,0 +1,25 @@
+// ── Init ─────────────────────────────────────────────────────
+// Track unsaved changes in SSH drawer
+document.getElementById('add-form').addEventListener('input', () => { if (editAlias) drawerDirty = true; });
+document.getElementById('add-form').addEventListener('change', () => { if (editAlias) drawerDirty = true; });
+// Patch selEnv and toggleFwd to also set drawerDirty
+const _origSelEnv = selEnv;
+window.selEnv = function(e) { _origSelEnv(e); if (editAlias) drawerDirty = true; };
+const _origToggleFwd = toggleFwd;
+window.toggleFwd = function() { _origToggleFwd(); if (editAlias) drawerDirty = true; };
+
+switchTab(localStorage.getItem('workit_tab') || 'ssh');
+_applyTheme(document.body.classList.contains('dark'));
+// Backup: confirm theme from server after load (handles cases where template injection was stale)
+fetch('/api/settings').then(r => r.json()).then(d => {
+  if (d.theme) _applyTheme(d.theme === 'dark');
+  if (d.font_scale) { document.body.style.zoom = d.font_scale; document.documentElement.style.setProperty('--bz', d.font_scale); _updateFontScaleUI(d.font_scale); }
+}).catch(() => {});
+
+// Command + R / Ctrl + R 새로고침 지원
+window.addEventListener('keydown', (e) => {
+  if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'r') {
+    e.preventDefault();
+    window.location.reload();
+  }
+});

@@ -5,20 +5,38 @@ from flask import Flask, request, jsonify, render_template
 from pathlib import Path
 from collections import defaultdict
 from datetime import datetime
-import yaml, json, os, sys, shutil, uuid
+import yaml, json, os, sys, shutil, uuid, re
 
-BASE_DIR         = Path(__file__).parent
-DATA_DIR         = BASE_DIR / "data"
+# When bundled with PyInstaller, templates/static live in sys._MEIPASS.
+# Data always lives in ~/.workit/data/ (user-writable, persists across updates).
+if getattr(sys, "frozen", False):
+    BASE_DIR = Path(sys._MEIPASS)
+    SOURCE_DIR = None
+else:
+    BASE_DIR   = Path(__file__).parent
+    SOURCE_DIR = BASE_DIR          # used for data migration below
+
+DATA_DIR         = Path.home() / ".workit" / "data"
+CACHE_DIR        = Path.home() / ".workit" / "cache"
+BACKUP_DIR       = Path.home() / ".workit" / "backups"
+SETTINGS_FILE    = CACHE_DIR / "settings.json"
 SSH_YAML         = DATA_DIR / "ssh" / "conn_info.yaml"
-ACCTS_FILE       = Path.home() / ".workit" / "accounts" / "accounts.json"
+ACCTS_FILE       = DATA_DIR / "accounts" / "accounts.json"
 SSH_CONFIG       = Path.home() / ".ssh" / "config"
-KEYS_ROOT        = Path.home() / ".ssh" / "keys"
+SSH_WORKIT_DIR   = DATA_DIR / "ssh"                         # ssh data root: ~/.workit/data/ssh/
+SSH_CONFS_DIR    = DATA_DIR / "ssh" / "configs"             # conf files: ~/.workit/data/ssh/configs/*.conf
+KEYS_ROOT        = DATA_DIR / "ssh" / "keys"                # key files: ~/.workit/data/ssh/keys/
 ENV_ORDER        = ["dev", "test", "stg", "prd"]
 KUBE_JSON        = DATA_DIR / "kube" / "contexts.json"
-KUBE_CONFIG      = Path.home() / ".kube" / "config"
-KUBE_CONFIGS_DIR = Path.home() / ".kube" / "configs"
+KUBE_CONFIG      = Path.home() / ".kube" / "config"   # system kubeconfig — not modified
+KUBE_CONFIGS_DIR = DATA_DIR / "kube" / "configs"      # workit kubeconfigs: ~/.workit/data/kube/configs/
+DOCS_DIR         = DATA_DIR / "docs"
 
-app = Flask(__name__)
+app = Flask(
+    __name__,
+    template_folder=str(BASE_DIR / "templates"),
+    static_folder=str(BASE_DIR / "static"),
+)
 
 _DEFAULT_SSH_YAML = """\
 version: "1.0"
@@ -26,41 +44,105 @@ version: "1.0"
 defaults:
   user: ec2-user
   port: 22
-  keys_dir: ~/.ssh/keys
+  keys_dir: ~/.workit/data/ssh/keys
   key_extension: .pem
   forward_agent: false
   server_alive_interval: 60
   server_alive_count_max: 3
 
-servers:
+servers: []
 """
 
 
+def _backup(src: Path, category: str = "misc", keep: int = 5) -> None:
+    """Copy src to ~/.workit/backups/{category}/{filename}.backup (single overwriting backup)."""
+    dest_dir = BACKUP_DIR / category
+    dest_dir.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(src, dest_dir / f"{src.name}.backup")
+
+
 def _init():
-    (DATA_DIR / "ssh").mkdir(parents=True, exist_ok=True)
+    # Migrate data from old repo-relative location if running from source
+    if SOURCE_DIR is not None:
+        old_data = SOURCE_DIR / "data"
+        _migrate_file(old_data / "ssh" / "conn_info.yaml", SSH_YAML)
+        _migrate_file(old_data / "kube" / "contexts.json", KUBE_JSON)
+
+    BACKUP_DIR.mkdir(parents=True, exist_ok=True)
+    SSH_WORKIT_DIR.mkdir(parents=True, exist_ok=True)
+    SSH_WORKIT_DIR.chmod(0o700)
+    SSH_CONFS_DIR.mkdir(parents=True, exist_ok=True)
+    SSH_CONFS_DIR.chmod(0o700)
+    KEYS_ROOT.mkdir(parents=True, exist_ok=True)
+
+    # Migrate conf files from old ~/.ssh/workit/ location
+    _old_ssh_workit = Path.home() / ".ssh" / "workit"
+    if _old_ssh_workit.exists():
+        for f in _old_ssh_workit.glob("*.conf"):
+            dst = SSH_CONFS_DIR / f.name
+            if not dst.exists():
+                shutil.copy2(f, dst)
+
+    # Migrate conf files from old ~/.workit/data/ssh/*.conf → ~/.workit/data/ssh/configs/
+    for f in SSH_WORKIT_DIR.glob("*.conf"):
+        dst = SSH_CONFS_DIR / f.name
+        if not dst.exists():
+            shutil.copy2(f, dst)
+        f.unlink()
+
+    # Migrate SSH keys from old ~/.ssh/keys/
+    _old_keys = Path.home() / ".ssh" / "keys"
+    if _old_keys.exists() and not any(KEYS_ROOT.rglob("*.pem")):
+        for src in _old_keys.rglob("*"):
+            if src.is_file():
+                rel = src.relative_to(_old_keys)
+                dst = KEYS_ROOT / rel
+                dst.parent.mkdir(parents=True, exist_ok=True)
+                if not dst.exists():
+                    shutil.copy2(src, dst)
+
     if not SSH_YAML.exists():
         SSH_YAML.write_text(_DEFAULT_SSH_YAML)
-    # Accounts: stored outside repo at ~/.workit/accounts/
+
+    CACHE_DIR.mkdir(parents=True, exist_ok=True)
+
     ACCTS_FILE.parent.mkdir(parents=True, exist_ok=True)
-    old_accts = DATA_DIR / "accounts.json"
-    if old_accts.exists() and not ACCTS_FILE.exists():
-        import shutil as _shutil
-        _shutil.copy2(str(old_accts), str(ACCTS_FILE))
-        old_accts.unlink()
-    elif not ACCTS_FILE.exists():
+    _migrate_file(Path.home() / ".workit" / "accounts" / "accounts.json", ACCTS_FILE)
+    if not ACCTS_FILE.exists():
         ACCTS_FILE.write_text('{"accounts": []}')
     ACCTS_FILE.chmod(0o600)
+
     (DATA_DIR / "kube").mkdir(parents=True, exist_ok=True)
     if not KUBE_JSON.exists():
         KUBE_JSON.write_text('{"contexts": []}')
     KUBE_CONFIGS_DIR.mkdir(parents=True, exist_ok=True)
+
+    # Migrate kube configs from old ~/.kube/configs/
+    _old_kube_configs = Path.home() / ".kube" / "configs"
+    if _old_kube_configs.exists():
+        for f in _old_kube_configs.glob("*.yaml"):
+            dst = KUBE_CONFIGS_DIR / f.name
+            if not dst.exists():
+                shutil.copy2(f, dst)
+
+    DOCS_DIR.mkdir(parents=True, exist_ok=True)
+
+
+def _migrate_file(src: Path, dst: Path):
+    """Copy src → dst if src exists and dst doesn't."""
+    if src.exists() and not dst.exists():
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(str(src), str(dst))
 
 
 # ═══ SSH helpers ══════════════════════════════════════════════
 
 def _load_ssh():
     with open(SSH_YAML) as f:
-        return yaml.safe_load(f) or {}
+        data = yaml.safe_load(f) or {}
+    if not isinstance(data.get("servers"), list):
+        data["servers"] = []
+    return data
 
 
 def _yv(v):
@@ -96,16 +178,18 @@ def _alias(project, env, role):
     return f"{project}-{env}-{role}"
 
 
-def _key_path(project, env, role, ext=".pem"):
-    return KEYS_ROOT / env / f"{_alias(project, env, role)}{ext}"
+def _resolve_alias(s):
+    """Return the SSH Host alias: explicit 'alias' field, or computed from project/env/role."""
+    return s.get("alias") or _alias(s["project"], s["env"], s.get("role", ""))
 
 
 def _enrich(s, d):
-    p, e, r = s["project"], s["env"], s["role"]
-    kp = _key_path(p, e, r, d.get("key_extension", ".pem"))
+    a  = _resolve_alias(s)
+    e  = s["env"]
+    kp = KEYS_ROOT / e / f"{a}{d.get('key_extension', '.pem')}"
     return {
         **s,
-        "alias":         _alias(p, e, r),
+        "alias":         a,
         "user":          s.get("user",          d.get("user",          "ec2-user")),
         "port":          s.get("port",          d.get("port",          22)),
         "proxy_jump":    s.get("proxy_jump",    ""),
@@ -135,8 +219,8 @@ def _save_key(kp, file=None, text=None, local_path=None):
     os.chmod(str(kp), 0o600)
 
 
-def _build_ssh_config(data):
-    d, servers = data.get("defaults", {}), data.get("servers", [])
+def _build_project_ssh_config(project, servers, d):
+    """Generate SSH config block for a single project."""
     by_env = defaultdict(list)
     for s in servers:
         by_env[s["env"]].append(s)
@@ -145,20 +229,19 @@ def _build_ssh_config(data):
         return s.get(field, d.get(field, fallback))
 
     lines = [
-        f"# Generated by Workit  [{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}]",
-        f"# Source: {SSH_YAML}", "",
+        f"# Workit — {project}  [{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}]",
+        "",
     ]
     for env in ENV_ORDER:
         if env not in by_env:
             continue
-        lines += [f"# {'=' * 54}", f"# Environment: {env.upper()}", f"# {'=' * 54}", ""]
+        lines += [f"# ── {env} {'─' * 50}", ""]
         for s in by_env[env]:
-            p, r = s["project"], s["role"]
-            a  = _alias(p, env, r)
+            a  = _resolve_alias(s)
             kp = KEYS_ROOT / env / f"{a}{rv(s, 'key_extension', '.pem')}"
             fa = "yes" if rv(s, "forward_agent", False) else "no"
             lines += [
-                f"# [{env}] {p} / {r}", f"Host {a}",
+                f"# [{env}] {a}", f"Host {a}",
                 f"    HostName          {s['hostname']}",
                 f"    User              {rv(s, 'user', 'ec2-user')}",
                 f"    Port              {rv(s, 'port', 22)}",
@@ -171,7 +254,180 @@ def _build_ssh_config(data):
             if s.get("proxy_jump"):
                 lines.append(f"    ProxyJump         {s['proxy_jump']}")
             lines.append("")
-    return "\n".join(lines)
+    return "\n".join(lines) + "\n"
+
+
+def _ensure_ssh_include():
+    """Ensure ~/.ssh/config includes the workit conf directory."""
+    new_include = "Include ~/.workit/data/ssh/configs/*.conf"
+    old_includes = [
+        "Include ~/.workit/data/ssh/*.conf",
+        "Include ~/.ssh/workit/*.conf",
+    ]
+    if SSH_CONFIG.exists():
+        text = SSH_CONFIG.read_text(errors="replace")
+        for old in old_includes:
+            if old in text:
+                _backup(SSH_CONFIG, "ssh")
+                SSH_CONFIG.write_text(text.replace(old, new_include))
+                SSH_CONFIG.chmod(0o600)
+                return
+        if new_include in text:
+            return
+        _backup(SSH_CONFIG, "ssh")
+        SSH_CONFIG.write_text(f"{new_include}\n\n{text}")
+    else:
+        SSH_CONFIG.write_text(f"{new_include}\n")
+    SSH_CONFIG.chmod(0o600)
+
+
+def _parse_ssh_host_blocks(text):
+    """Parse SSH Host blocks from a config text. Returns list of host dicts (no tagging)."""
+    entries, current = [], None
+    for raw_line in text.splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#"):
+            continue
+        lower = line.lower()
+        if lower.startswith("include"):
+            continue
+        if lower.startswith("match"):
+            if current and current.get("alias") and current["alias"] != "*":
+                entries.append(current)
+            current = None
+            continue
+        if lower.startswith("host "):
+            if current and current.get("alias") and current["alias"] != "*":
+                entries.append(current)
+            current = {"alias": line.split(None, 1)[1].strip()}
+            continue
+        if current is None:
+            continue
+        if "=" in line:
+            key, _, value = line.partition("=")
+        else:
+            parts = line.split(None, 1)
+            key, value = parts[0], parts[1] if len(parts) > 1 else ""
+        field_map = {
+            "hostname": "hostname", "user": "user", "port": "port",
+            "identityfile": "key_path", "proxyjump": "proxy_jump",
+            "forwardagent": "forward_agent",
+        }
+        k = key.strip().lower()
+        if k in field_map:
+            current[field_map[k]] = value.strip()
+    if current and current.get("alias") and current["alias"] != "*":
+        entries.append(current)
+    return entries
+
+
+def _parse_unmanaged_ssh_hosts(registered_aliases=None):
+    """Return ALL SSH hosts visible through ~/.ssh/config (direct + from Include files).
+
+    Returns (hosts, includes):
+      hosts:    list of host dicts with is_workit and source_file fields
+      includes: list of {"pattern": str, "files": [str]} for each Include directive
+    """
+    if not SSH_CONFIG.exists():
+        return [], []
+
+    confs_dir_str = str(SSH_CONFS_DIR)
+    includes = []
+    direct_hosts = []
+    current = None
+
+    for raw_line in SSH_CONFIG.read_text(errors="replace").splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#"):
+            continue
+        lower = line.lower()
+        if lower.startswith("include"):
+            pattern_raw = line.split(None, 1)[1].strip() if len(line.split(None, 1)) > 1 else ""
+            pattern_exp = str(Path(pattern_raw.replace("~", str(Path.home()))))
+            expanded = sorted(str(p) for p in Path("/").glob(pattern_exp.lstrip("/"))) if pattern_exp else []
+            includes.append({"pattern": pattern_raw, "files": expanded})
+            continue
+        if lower.startswith("match"):
+            if current and current.get("alias") and current["alias"] != "*":
+                direct_hosts.append(current)
+            current = None
+            continue
+        if lower.startswith("host "):
+            if current and current.get("alias") and current["alias"] != "*":
+                direct_hosts.append(current)
+            current = {"alias": line.split(None, 1)[1].strip()}
+            continue
+        if current is None:
+            continue
+        if "=" in line:
+            key, _, value = line.partition("=")
+        else:
+            parts = line.split(None, 1)
+            key, value = parts[0], parts[1] if len(parts) > 1 else ""
+        field_map = {
+            "hostname": "hostname", "user": "user", "port": "port",
+            "identityfile": "key_path", "proxyjump": "proxy_jump",
+            "forwardagent": "forward_agent",
+        }
+        k = key.strip().lower()
+        if k in field_map:
+            current[field_map[k]] = value.strip()
+
+    if current and current.get("alias") and current["alias"] != "*":
+        direct_hosts.append(current)
+
+    hosts = []
+    seen_aliases: set = set(registered_aliases or [])
+
+    for h in direct_hosts:
+        alias = h.get("alias", "")
+        if not alias or alias == "*" or alias in seen_aliases:
+            continue
+        h["source_file"] = "~/.ssh/config"
+        h["is_workit"] = False
+        h["is_direct"] = True
+        seen_aliases.add(alias)
+        hosts.append(h)
+
+    # Also parse hosts from each Include file
+    for inc in includes:
+        for file_path in inc["files"]:
+            is_workit_file = file_path.startswith(confs_dir_str)
+            if is_workit_file:
+                continue
+            fp = Path(file_path)
+            if not fp.exists():
+                continue
+            try:
+                file_hosts = _parse_ssh_host_blocks(fp.read_text(errors="replace"))
+            except Exception:
+                continue
+            display_path = file_path.replace(str(Path.home()), "~")
+            for h in file_hosts:
+                alias = h.get("alias", "")
+                if not alias or alias == "*" or alias in seen_aliases:
+                    continue
+                seen_aliases.add(alias)
+                h["source_file"] = display_path
+                h["is_workit"] = False
+                h["is_direct"] = False
+                hosts.append(h)
+
+    return hosts, includes
+
+
+# ═══ Settings helpers ═════════════════════════════════════════
+
+def _load_settings():
+    try:
+        return json.loads(SETTINGS_FILE.read_text()) if SETTINGS_FILE.exists() else {}
+    except Exception:
+        return {}
+
+
+def _save_settings(data):
+    CACHE_DIR.mkdir(parents=True, exist_ok=True)
+    SETTINGS_FILE.write_text(json.dumps(data, ensure_ascii=False, indent=2))
 
 
 # ═══ Accounts helpers ═════════════════════════════════════════
@@ -270,26 +526,48 @@ def _remove_from_kube_config(ctx_name: str):
 @app.route("/")
 def index():
     from flask import make_response
-    resp = make_response(render_template("index.html"))
+    theme = _load_settings().get("theme", "light")
+    resp  = make_response(render_template("index.html", theme=theme))
     resp.headers["Cache-Control"] = "no-store"
     return resp
+
+
+@app.route("/api/settings")
+def settings_get():
+    return jsonify(_load_settings())
+
+
+@app.route("/api/settings", methods=["POST"])
+def settings_set():
+    body = request.get_json() or {}
+    data = _load_settings()
+    data.update({k: v for k, v in body.items() if k in ("theme", "font_scale")})
+    _save_settings(data)
+    return jsonify(data)
 
 
 # ── SSH ───────────────────────────────────────────────────────
 
 @app.route("/api/ssh/servers")
 def ssh_list():
-    data = _load_ssh()
-    d    = data.get("defaults", {})
-    servers = [_enrich(s, d) for s in data.get("servers", [])]
-    return jsonify({"servers": servers, "aliases": [s["alias"] for s in servers]})
+    data     = _load_ssh()
+    d        = data.get("defaults", {})
+    servers  = [_enrich(s, d) for s in data.get("servers", [])]
+    registered_aliases = {s["alias"] for s in servers}
+    unmanaged, includes = _parse_unmanaged_ssh_hosts(registered_aliases)
+    return jsonify({
+        "servers":   servers,
+        "aliases":   [s["alias"] for s in servers],
+        "unmanaged": unmanaged,
+        "includes":  includes,
+    })
 
 
 @app.route("/api/ssh/servers", methods=["POST"])
 def ssh_add():
     project     = request.form.get("project",       "").strip()
     env         = request.form.get("env",           "").strip()
-    role        = request.form.get("role",          "").strip()
+    host        = request.form.get("host",          "").strip()   # full SSH alias (user-defined)
     hostname    = request.form.get("hostname",      "").strip()
     user        = request.form.get("user",          "").strip()
     port_s      = request.form.get("port",          "22").strip()
@@ -298,9 +576,12 @@ def ssh_add():
     description = request.form.get("description",   "").strip()
     key_file    = request.files.get("key_file")
     key_text    = request.form.get("key_text",      "").strip()
+    key_lpath   = request.form.get("local_path",    "").strip()
+    import_source_file = request.form.get("import_source_file", "").strip()
+    import_orig_alias  = request.form.get("import_orig_alias",  "").strip()
 
-    if not all([project, env, role, hostname]):
-        return jsonify({"error": "project, env, role, hostname are required"}), 400
+    if not all([project, env, host, hostname]):
+        return jsonify({"error": "project, env, host, hostname are required"}), 400
     if env not in ENV_ORDER:
         return jsonify({"error": f"env must be one of {ENV_ORDER}"}), 400
 
@@ -308,11 +589,23 @@ def ssh_add():
     d       = data.get("defaults", {})
     servers = data.get("servers", [])
 
-    a = _alias(project, env, role)
-    if any(_alias(s["project"], s["env"], s["role"]) == a for s in servers):
-        return jsonify({"error": f"'{a}' already exists"}), 400
+    if any(_resolve_alias(s) == host for s in servers):
+        return jsonify({"error": f"'{host}' already exists"}), 400
 
-    new = {"project": project, "env": env, "role": role, "hostname": hostname}
+    # If registered from an unmanaged system config, remove it from that file first
+    if import_source_file and import_orig_alias:
+        target = Path(import_source_file.replace("~", str(Path.home())))
+        if target.exists():
+            try:
+                text = target.read_text(errors="replace")
+                new_text = _remove_ssh_host_block(text, import_orig_alias)
+                if new_text != text:
+                    _backup(target, "ssh")
+                    target.write_text(new_text)
+            except Exception as e:
+                return jsonify({"error": f"Failed to remove '{import_orig_alias}' from system config: {str(e)}"}), 500
+
+    new = {"project": project, "env": env, "alias": host, "hostname": hostname}
     if user and user != d.get("user"):
         new["user"] = user
     try:
@@ -329,9 +622,13 @@ def ssh_add():
         new["description"] = description
 
     has_file = key_file and key_file.filename
-    if has_file or key_text:
-        kp = _key_path(project, env, role, d.get("key_extension", ".pem"))
-        _save_key(kp, file=key_file if has_file else None, text=key_text or None)
+    if has_file or key_text or key_lpath:
+        kp = KEYS_ROOT / env / f"{host}{d.get('key_extension', '.pem')}"
+        try:
+            _save_key(kp, file=key_file if has_file else None,
+                      text=key_text or None, local_path=key_lpath or None)
+        except FileNotFoundError:
+            pass
 
     servers.append(new)
     data["servers"] = servers
@@ -343,7 +640,7 @@ def ssh_add():
 def ssh_update(a):
     project     = request.form.get("project",       "").strip()
     env         = request.form.get("env",           "").strip()
-    role        = request.form.get("role",          "").strip()
+    host        = request.form.get("host",          "").strip()   # new full alias
     hostname    = request.form.get("hostname",      "").strip()
     user        = request.form.get("user",          "").strip()
     port_s      = request.form.get("port",          "22").strip()
@@ -352,9 +649,10 @@ def ssh_update(a):
     description = request.form.get("description",   "").strip()
     key_file    = request.files.get("key_file")
     key_text    = request.form.get("key_text",      "").strip()
+    key_lpath   = request.form.get("local_path",    "").strip()
 
-    if not all([project, env, role, hostname]):
-        return jsonify({"error": "project, env, role, hostname are required"}), 400
+    if not all([project, env, host, hostname]):
+        return jsonify({"error": "project, env, host, hostname are required"}), 400
     if env not in ENV_ORDER:
         return jsonify({"error": f"env must be one of {ENV_ORDER}"}), 400
 
@@ -363,18 +661,18 @@ def ssh_update(a):
     servers = data.get("servers", [])
 
     target_idx = next((i for i, s in enumerate(servers)
-                       if _alias(s["project"], s["env"], s["role"]) == a), None)
+                       if _resolve_alias(s) == a), None)
     if target_idx is None:
         return jsonify({"error": "not found"}), 404
 
     old_server = servers[target_idx]
-    new_alias  = _alias(project, env, role)
+    new_alias  = host
     if new_alias != a:
-        if any(_alias(s["project"], s["env"], s["role"]) == new_alias
+        if any(_resolve_alias(s) == new_alias
                for i, s in enumerate(servers) if i != target_idx):
             return jsonify({"error": f"'{new_alias}' already exists"}), 400
 
-    updated = {"project": project, "env": env, "role": role, "hostname": hostname}
+    updated = {"project": project, "env": env, "alias": host, "hostname": hostname}
     if user and user != d.get("user"):
         updated["user"] = user
     try:
@@ -390,13 +688,13 @@ def ssh_update(a):
     if description:
         updated["description"] = description
 
-    old_kp = _key_path(old_server["project"], old_server["env"], old_server["role"],
-                       d.get("key_extension", ".pem"))
-    new_kp = _key_path(project, env, role, d.get("key_extension", ".pem"))
-    has_new_key = (key_file and key_file.filename) or key_text
+    ext    = d.get("key_extension", ".pem")
+    old_kp = KEYS_ROOT / old_server["env"] / f"{a}{ext}"
+    new_kp = KEYS_ROOT / env / f"{host}{ext}"
+    has_new_key = (key_file and key_file.filename) or key_text or key_lpath
     if has_new_key:
         _save_key(new_kp, file=key_file if (key_file and key_file.filename) else None,
-                  text=key_text or None)
+                  text=key_text or None, local_path=key_lpath or None)
     elif old_kp != new_kp and old_kp.exists():
         new_kp.parent.mkdir(parents=True, exist_ok=True)
         new_kp.parent.chmod(0o700)
@@ -413,11 +711,58 @@ def ssh_update(a):
 def ssh_delete(a):
     data     = _load_ssh()
     original = data.get("servers", [])
-    data["servers"] = [s for s in original if _alias(s["project"], s["env"], s["role"]) != a]
+    data["servers"] = [s for s in original if _resolve_alias(s) != a]
     if len(data["servers"]) == len(original):
         return jsonify({"error": "not found"}), 404
     _save_ssh(data)
     return jsonify({"ok": True})
+
+
+@app.route("/api/ssh/unmanaged/<path:alias>", methods=["DELETE"])
+def ssh_unmanaged_delete(alias):
+    """Remove a Host block from a SSH config file by alias.
+
+    Optional JSON body: {"source_file": "~/.workit/data/ssh/configs/project.conf"}
+    Defaults to ~/.ssh/config if not provided.
+    """
+    body = request.get_json(silent=True) or {}
+    source_raw = body.get("source_file", "~/.ssh/config")
+    target = Path(source_raw.replace("~", str(Path.home())))
+    if not target.exists():
+        return jsonify({"error": f"{source_raw} not found"}), 404
+    text = target.read_text(errors="replace")
+    new_text = _remove_ssh_host_block(text, alias)
+    if new_text == text:
+        return jsonify({"error": "host not found"}), 404
+    _backup(target, "ssh")
+    target.write_text(new_text)
+    return jsonify({"ok": True})
+
+
+def _remove_ssh_host_block(text, alias):
+    """Remove a named Host block from SSH config text, preserving everything else."""
+    result, current_block, current_alias = [], [], None
+    for line in text.splitlines(keepends=True):
+        m = re.match(r'^Host\s+(\S.*)', line, re.I)
+        if m:
+            if current_alias is not None:
+                if current_alias != alias:
+                    result.extend(current_block)
+            elif current_block:
+                result.extend(current_block)
+            current_alias = m.group(1).strip()
+            current_block = [line]
+        else:
+            if current_alias is not None:
+                current_block.append(line)
+            else:
+                result.append(line)
+    if current_alias is not None:
+        if current_alias != alias:
+            result.extend(current_block)
+    elif current_block:
+        result.extend(current_block)
+    return ''.join(result)
 
 
 @app.route("/api/ssh/servers/<path:a>/key", methods=["POST"])
@@ -431,14 +776,11 @@ def ssh_upload_key(a):
 
     data   = _load_ssh()
     d      = data.get("defaults", {})
-    target = next((s for s in data.get("servers", []) if _alias(s["project"], s["env"], s["role"]) == a), None)
+    target = next((s for s in data.get("servers", []) if _resolve_alias(s) == a), None)
     if not target:
-        parts = a.split("-", 2)
-        if len(parts) != 3:
-            return jsonify({"error": f"'{a}' not found"}), 404
-        target = {"project": parts[0], "env": parts[1], "role": parts[2]}
+        return jsonify({"error": f"'{a}' not found"}), 404
 
-    kp = _key_path(target["project"], target["env"], target["role"], d.get("key_extension", ".pem"))
+    kp = KEYS_ROOT / target["env"] / f"{a}{d.get('key_extension', '.pem')}"
     try:
         _save_key(kp, file=file if (file and file.filename) else None,
                   text=text or None, local_path=local_path or None)
@@ -471,19 +813,42 @@ def ssh_scan_keys():
 @app.route("/api/ssh/apply", methods=["POST"])
 def ssh_apply():
     data    = _load_ssh()
-    content = _build_ssh_config(data)
-    if SSH_CONFIG.exists() and SSH_CONFIG.read_text().strip():
-        ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-        shutil.copy2(SSH_CONFIG, SSH_CONFIG.with_name(f"config.backup.{ts}"))
-    d = data.get("defaults", {})
-    keys_root = Path(os.path.expanduser(d.get("keys_dir", "~/.ssh/keys")))
-    for env in {s["env"] for s in data.get("servers", [])}:
+    d       = data.get("defaults", {})
+    servers = data.get("servers", [])
+
+    # Group by project → one file per project in ~/.ssh/workit/
+    by_project: dict = {}
+    for s in servers:
+        by_project.setdefault(s["project"], []).append(s)
+
+    SSH_CONFS_DIR.mkdir(parents=True, exist_ok=True)
+    SSH_CONFS_DIR.chmod(0o700)
+
+    written: set = set()
+    for project, proj_servers in by_project.items():
+        content = _build_project_ssh_config(project, proj_servers, d)
+        fpath   = SSH_CONFS_DIR / f"{project}.conf"
+        fpath.write_text(content)
+        fpath.chmod(0o600)
+        written.add(project)
+
+    # Remove stale project files that no longer have servers
+    for fpath in SSH_CONFS_DIR.glob("*.conf"):
+        if fpath.stem not in written:
+            fpath.unlink()
+
+    # Create key directories
+    keys_root = Path(os.path.expanduser(d.get("keys_dir", "~/.workit/data/ssh/keys")))
+    for env in {s["env"] for s in servers}:
         env_dir = keys_root / env
         env_dir.mkdir(parents=True, exist_ok=True)
         env_dir.chmod(0o700)
-    SSH_CONFIG.write_text(content)
-    SSH_CONFIG.chmod(0o600)
-    return jsonify({"ok": True, "output": "~/.ssh/config 업데이트 완료"})
+
+    # Ensure ~/.ssh/config has the Include line (backs up config first if needed)
+    _ensure_ssh_include()
+
+    n = len(written)
+    return jsonify({"ok": True, "output": f"~/.ssh/workit/ 업데이트 완료 ({n}개 프로젝트)"})
 
 
 # ── Kubernetes ────────────────────────────────────────────────
@@ -639,6 +1004,12 @@ def kube_add():
         "env":          env,
         "description":  (body.get("description") or "").strip(),
     }
+    if body.get("_fromSys"):
+        try:
+            _remove_from_kube_config(ctx_name)
+        except Exception:
+            pass
+
     data.setdefault("contexts", []).append(entry)
     _save_kube(data)
 
@@ -713,6 +1084,60 @@ def kube_delete(cid):
     return jsonify({"ok": True})
 
 
+@app.route("/api/kube/system")
+def kube_system_list():
+    """Return contexts directly from ~/.kube/config (read-only view, no import)."""
+    if not KUBE_CONFIG.exists():
+        return jsonify({"contexts": []})
+    clusters, users, ctx_list = _parse_kubeconfig(KUBE_CONFIG.read_text())
+    if ctx_list is None:
+        return jsonify({"contexts": []})
+    result = []
+    for ctx in ctx_list:
+        ctx_name = ctx.get("name", "")
+        if not ctx_name:
+            continue
+        ctx_data = ctx.get("context") or {}
+        cl_name  = ctx_data.get("cluster", "")
+        cl_info  = (clusters or {}).get(cl_name, {})
+        result.append({
+            "context_name": ctx_name,
+            "cluster_name": cl_name,
+            "server":       cl_info.get("server", ""),
+            "user_name":    ctx_data.get("user", ""),
+            "namespace":    ctx_data.get("namespace", ""),
+        })
+    return jsonify({"contexts": result})
+
+
+@app.route("/api/kube/system/<path:ctx_name>", methods=["DELETE"])
+def kube_system_delete(ctx_name):
+    """Remove a context (and unused cluster/user) from ~/.kube/config."""
+    if not KUBE_CONFIG.exists():
+        return jsonify({"error": "~/.kube/config not found"}), 404
+    cfg = yaml.safe_load(KUBE_CONFIG.read_text()) or {}
+    contexts = cfg.get("contexts") or []
+    target = next((c for c in contexts if c.get("name") == ctx_name), None)
+    if not target:
+        return jsonify({"error": "context not found"}), 404
+
+    cfg["contexts"] = [c for c in contexts if c.get("name") != ctx_name]
+
+    ctx_data  = target.get("context") or {}
+    cl_name   = ctx_data.get("cluster", "")
+    user_name = ctx_data.get("user", "")
+    remaining_clusters = {(c.get("context") or {}).get("cluster") for c in cfg["contexts"]}
+    remaining_users    = {(c.get("context") or {}).get("user")    for c in cfg["contexts"]}
+    if cl_name and cl_name not in remaining_clusters:
+        cfg["clusters"] = [c for c in (cfg.get("clusters") or []) if c.get("name") != cl_name]
+    if user_name and user_name not in remaining_users:
+        cfg["users"] = [u for u in (cfg.get("users") or []) if u.get("name") != user_name]
+
+    _backup(KUBE_CONFIG, "kube")
+    KUBE_CONFIG.write_text(yaml.dump(cfg, default_flow_style=False, allow_unicode=True))
+    return jsonify({"ok": True})
+
+
 @app.route("/api/kube/apply", methods=["POST"])
 def kube_apply():
     workit_ctxs = _load_kube().get("contexts", [])
@@ -779,6 +1204,92 @@ def accts_delete(aid):
     return jsonify({"ok": True})
 
 
+# ═══ Docs helpers ═════════════════════════════════════════════
+
+def _parse_doc(text):
+    """Return (frontmatter_dict, markdown_content) from a doc file."""
+    if not text.startswith('---'):
+        return {}, text
+    try:
+        idx = text.index('\n---', 3)
+        front = yaml.safe_load(text[3:idx]) or {}
+        return front, text[idx + 4:].lstrip('\n')
+    except (ValueError, yaml.YAMLError):
+        return {}, text
+
+
+def _format_doc(title, urls, content):
+    front = {'title': title}
+    valid = [u for u in (urls or []) if isinstance(u, str) and u.strip()]
+    if valid:
+        front['urls'] = valid
+    return "---\n" + yaml.dump(front, allow_unicode=True, default_flow_style=False).strip() + "\n---\n\n" + content
+
+
+# ═══ Docs routes ══════════════════════════════════════════════
+
+@app.route('/api/docs', methods=['GET'])
+def docs_list():
+    DOCS_DIR.mkdir(parents=True, exist_ok=True)
+    docs = []
+    for f in sorted(DOCS_DIR.glob('*.md'), key=lambda p: p.stat().st_mtime, reverse=True):
+        text = f.read_text(encoding='utf-8')
+        front, content = _parse_doc(text)
+        docs.append({
+            'id': f.stem,
+            'title': front.get('title') or f.stem,
+            'urls': front.get('urls') or [],
+            'preview': content[:100].replace('\n', ' ').strip(),
+            'updated_at': int(f.stat().st_mtime),
+        })
+    return jsonify(docs)
+
+
+@app.route('/api/docs/<doc_id>', methods=['GET'])
+def docs_get(doc_id):
+    path = DOCS_DIR / f"{doc_id}.md"
+    if not path.exists():
+        return jsonify({'error': 'not found'}), 404
+    text = path.read_text(encoding='utf-8')
+    front, content = _parse_doc(text)
+    return jsonify({'id': doc_id, 'title': front.get('title') or doc_id,
+                    'urls': front.get('urls') or [], 'content': content})
+
+
+@app.route('/api/docs', methods=['POST'])
+def docs_create():
+    data = request.get_json() or {}
+    DOCS_DIR.mkdir(parents=True, exist_ok=True)
+    doc_id = f"doc_{uuid.uuid4().hex[:10]}"
+    (DOCS_DIR / f"{doc_id}.md").write_text(
+        _format_doc(data.get('title', '제목 없음'), data.get('urls', []), data.get('content', '')),
+        encoding='utf-8')
+    return jsonify({'id': doc_id}), 201
+
+
+@app.route('/api/docs/<doc_id>', methods=['PUT'])
+def docs_update(doc_id):
+    path = DOCS_DIR / f"{doc_id}.md"
+    if not path.exists():
+        return jsonify({'error': 'not found'}), 404
+    existing_front, existing_content = _parse_doc(path.read_text(encoding='utf-8'))
+    data = request.get_json() or {}
+    path.write_text(_format_doc(
+        data.get('title', existing_front.get('title', '')),
+        data.get('urls', existing_front.get('urls', [])),
+        data.get('content', existing_content),
+    ), encoding='utf-8')
+    return jsonify({'ok': True})
+
+
+@app.route('/api/docs/<doc_id>', methods=['DELETE'])
+def docs_delete(doc_id):
+    path = DOCS_DIR / f"{doc_id}.md"
+    if path.exists():
+        path.unlink()
+    return jsonify({'ok': True})
+
+
 # ═══ Entry ════════════════════════════════════════════════════
 
 if __name__ == "__main__":
@@ -787,4 +1298,4 @@ if __name__ == "__main__":
     debug = "--debug" in sys.argv
     if not debug:
         print(f"  Workit  →  http://localhost:{port}")
-    app.run(debug=debug, port=port, host="0.0.0.0")
+    app.run(debug=debug, port=port, host="127.0.0.1")

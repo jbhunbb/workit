@@ -1,0 +1,508 @@
+<div id="overlay" onclick="closeDrawer()"></div>
+
+<div id="drawer">
+  <div class="px-5 py-4 border-b border-slate-100 flex items-center justify-between flex-shrink-0">
+    <h2 id="drawer-title" class="text-sm font-bold text-slate-900">서버 추가</h2>
+    <button onclick="closeDrawer()" class="w-7 h-7 rounded-lg flex items-center justify-center text-slate-400 hover:bg-slate-100 transition-colors">
+      <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+    </button>
+  </div>
+
+  <!-- Preview -->
+  <div class="mx-5 mt-4 px-3.5 py-3 bg-slate-50 rounded-xl border border-slate-200 flex-shrink-0">
+    <p class="text-[10px] text-slate-400 font-semibold uppercase tracking-wider mb-1">미리보기</p>
+    <p class="font-mono text-sm font-bold text-indigo-600" id="alias-preview">—</p>
+    <p class="font-mono text-xs text-slate-400 mt-0.5" id="key-preview">IdentityFile: —</p>
+  </div>
+
+  <form id="add-form" onsubmit="submitForm(event)" class="flex-1 min-h-0 overflow-y-auto px-5 py-4 space-y-4">
+    <div>
+      <label class="lbl">Project <span class="text-red-400">*</span></label>
+      <input id="f-project" name="project" type="text" placeholder="hyundai-capital" class="inp" oninput="_autoHintHost();updatePreview()" required>
+    </div>
+    <div>
+      <label class="lbl">타입 <span class="text-red-400">*</span></label>
+      <div class="grid grid-cols-4 gap-2">
+        <label class="env-pill" data-env="dev" onclick="selEnv('dev')"><input type="radio" name="env" value="dev" class="sr-only" required>dev</label>
+        <label class="env-pill" data-env="test" onclick="selEnv('test')"><input type="radio" name="env" value="test" class="sr-only">test</label>
+        <label class="env-pill" data-env="stg" onclick="selEnv('stg')"><input type="radio" name="env" value="stg" class="sr-only">stg</label>
+        <label class="env-pill" data-env="prd" onclick="selEnv('prd')"><input type="radio" name="env" value="prd" class="sr-only">prd</label>
+      </div>
+    </div>
+    <div>
+      <label class="lbl">Host</label>
+      <input id="f-host" name="host" type="text" class="inp" autocapitalize="off" autocorrect="off" spellcheck="false" oninput="_enforceHostChars(this);updatePreview()" required>
+    </div>
+    <div>
+      <label class="lbl">설명</label>
+      <input name="description" type="text" placeholder="마스터 노드 배스천" class="inp">
+    </div>
+    <div>
+      <label class="lbl">User</label>
+      <input name="user" type="text" placeholder="ec2-user" class="inp">
+    </div>
+    <div>
+      <label class="lbl">IP / Hostname <span class="text-red-400">*</span></label>
+      <input name="hostname" type="text" placeholder="10.0.0.1" class="inp" required>
+    </div>
+    <div class="grid grid-cols-2 gap-3">
+      <div>
+        <label class="lbl">Port</label>
+        <input name="port" type="number" value="22" class="inp">
+      </div>
+      <div>
+        <label class="lbl">ProxyJump</label>
+        <select name="proxy_jump" id="f-proxy" class="inp bg-white">
+          <option value="">— none —</option>
+        </select>
+      </div>
+    </div>
+    <div class="flex items-center gap-3">
+      <div id="fwd-toggle" class="toggle" onclick="toggleFwd()">
+        <div class="toggle-knob"></div>
+      </div>
+      <input type="hidden" name="forward_agent" id="fwd-val" value="false">
+      <span class="text-sm text-slate-600">Forward Agent</span>
+    </div>
+    <div>
+      <label class="lbl">설명</label>
+      <input id="f-desc" name="description" type="text" placeholder="서버 용도 설명 (선택)" class="inp">
+    </div>
+    <!-- Import key notice: shown when registering an unmanaged host -->
+    <div id="import-key-notice-wrap" class="hidden rounded-xl border border-emerald-200 bg-emerald-50 px-3.5 py-2.5">
+      <p class="text-[11px] font-semibold text-emerald-700 mb-0.5">기존 키 파일 자동 연결</p>
+      <p id="import-key-path-txt" class="text-[11px] font-mono text-emerald-600 break-all"></p>
+      <input type="hidden" id="f-import-key-path">
+    </div>
+    <input type="hidden" id="f-import-source-file">
+    <input type="hidden" id="f-import-orig-alias">
+    <div>
+      <label class="lbl mb-2">Identity File</label>
+      <div class="flex items-center gap-0.5 p-0.5 bg-slate-100 rounded-lg mb-3">
+        <button type="button" id="tab-file" onclick="setKeyMode('file')" class="km-tab active flex-1 text-center">파일 업로드</button>
+        <button type="button" id="tab-text" onclick="setKeyMode('text')" class="km-tab flex-1 text-center">텍스트 입력</button>
+      </div>
+      <div id="key-file-zone">
+        <div id="dz" class="dz" onclick="document.getElementById('f-keyfile').click()"
+          ondragover="dzOver(event,'dz')" ondragleave="dzLeave('dz')" ondrop="dzDrop(event,'dz','f-keyfile')">
+          <svg id="dz-icon" class="w-7 h-7 mx-auto mb-2 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"/></svg>
+          <p id="dz-text" class="text-sm text-slate-500">클릭하거나 드래그하세요</p>
+          <p class="text-xs text-slate-400 mt-1">.pem / .key</p>
+          <input type="file" id="f-keyfile" name="key_file" class="hidden" accept=".pem,.key" onchange="dzSelect(this,'dz','dz-icon','dz-text')">
+        </div>
+      </div>
+      <div id="key-text-zone" class="hidden">
+        <textarea name="key_text" rows="8"
+          placeholder="-----BEGIN RSA PRIVATE KEY-----&#10;MIIEowIBAAKCAQEA...&#10;-----END RSA PRIVATE KEY-----"
+          class="w-full px-3 py-2.5 font-mono text-xs border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-400/30 resize-none bg-slate-50"></textarea>
+      </div>
+      <details class="mt-2">
+        <summary class="text-xs text-slate-400 cursor-pointer select-none hover:text-slate-600 transition-colors">키 생성 명령어 보기</summary>
+        <div class="mt-2 space-y-2 rounded-xl border border-slate-200 bg-slate-950 p-3">
+          <p class="text-[10px] font-semibold text-slate-400 uppercase tracking-wider mb-1">① 키 생성</p>
+          <div class="guide-cmd">
+            <code id="keygen-hint" class="text-emerald-400">ssh-keygen -t rsa -b 4096 -f ~/.workit/data/ssh/keys/{env}/{host}.pem -C "{host}"</code>
+            <button class="guide-cmd-copy" onclick="copyCode('keygen-hint','kg-c1')"><span id="kg-c1">copy</span></button>
+          </div>
+          <p class="text-[10px] font-semibold text-slate-400 uppercase tracking-wider mt-1">② 권한 설정</p>
+          <div class="guide-cmd">
+            <code id="keygen-chmod" class="text-sky-300">chmod 600 ~/.workit/data/ssh/keys/{env}/{host}.pem</code>
+            <button class="guide-cmd-copy" onclick="copyCode('keygen-chmod','kg-c2')"><span id="kg-c2">copy</span></button>
+          </div>
+          <p class="text-[10px] font-semibold text-slate-400 uppercase tracking-wider mt-1">③ 공개키를 서버에 등록</p>
+          <div class="guide-cmd">
+            <code id="keygen-copyid" class="text-amber-300">ssh-copy-id -i ~/.workit/data/ssh/keys/{env}/{host}.pem.pub user@{hostname}</code>
+            <button class="guide-cmd-copy" onclick="copyCode('keygen-copyid','kg-c3')"><span id="kg-c3">copy</span></button>
+          </div>
+          <p class="text-[10px] text-slate-500 mt-1">또는 수동: <span class="text-slate-400 font-mono text-[10px]">cat ~/.workit/data/ssh/keys/{env}/{host}.pem.pub</span> → 서버 <span class="text-slate-400 font-mono text-[10px]">~/.ssh/authorized_keys</span>에 추가</p>
+        </div>
+      </details>
+    </div>
+  </form>
+
+  <div class="px-5 py-4 border-t border-slate-100 flex gap-2.5 flex-shrink-0">
+    <button type="button" id="drawer-cancel-btn" onclick="closeDrawer()"
+      class="flex-1 py-2.5 text-sm font-semibold text-slate-600 bg-slate-100 rounded-xl hover:bg-slate-200 transition-colors">취소</button>
+    <button type="submit" form="add-form" id="submit-btn"
+      class="flex-1 py-2.5 text-sm font-semibold text-white rounded-xl transition-all"
+      style="background:#4f46e5">추가</button>
+  </div>
+</div>
+
+<!-- ═══ KEY MODAL ══════════════════════════════════════════ -->
+<div id="key-modal" class="modal-wrap">
+  <div class="modal">
+    <div class="px-5 py-4 border-b border-slate-100 flex items-center justify-between">
+      <div>
+        <p class="text-sm font-bold text-slate-900">키 파일 설정</p>
+        <p class="text-xs text-slate-400 font-mono mt-0.5" id="km-alias"></p>
+      </div>
+      <button onclick="kmClose()" class="w-7 h-7 rounded-lg flex items-center justify-center text-slate-400 hover:bg-slate-100 transition-colors">
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+      </button>
+    </div>
+    <div class="px-5 py-3">
+      <p class="text-xs text-slate-400 font-mono bg-slate-50 rounded-lg px-3 py-2 border border-slate-200 break-all" id="km-path"></p>
+    </div>
+    <div class="px-5 pb-1">
+      <div class="flex items-center gap-0.5 p-0.5 bg-slate-100 rounded-lg">
+        <button type="button" id="km-tab-file" onclick="kmTabSwitch('file')" class="km-tab active flex-1 text-center">파일</button>
+        <button type="button" id="km-tab-text" onclick="kmTabSwitch('text')" class="km-tab flex-1 text-center">텍스트</button>
+        <button type="button" id="km-tab-path" onclick="kmTabSwitch('path')" class="km-tab flex-1 text-center">경로</button>
+      </div>
+    </div>
+    <div class="px-5 pt-3 pb-5">
+      <div id="km-panel-file">
+        <div id="km-dz" class="dz" onclick="document.getElementById('km-file-inp').click()"
+          ondragover="dzOver(event,'km-dz')" ondragleave="dzLeave('km-dz')" ondrop="dzDrop(event,'km-dz','km-file-inp')">
+          <svg id="km-dz-icon" class="w-7 h-7 mx-auto mb-2 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"/></svg>
+          <p id="km-dz-text" class="text-sm text-slate-500">클릭하거나 드래그하세요</p>
+          <input type="file" id="km-file-inp" class="hidden" accept=".pem,.key" onchange="dzSelect(this,'km-dz','km-dz-icon','km-dz-text')">
+        </div>
+      </div>
+      <div id="km-panel-text" class="hidden">
+        <textarea id="km-text" rows="9"
+          placeholder="-----BEGIN RSA PRIVATE KEY-----&#10;...&#10;-----END RSA PRIVATE KEY-----"
+          class="w-full px-3 py-2.5 font-mono text-xs border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-400/30 resize-none bg-slate-50"></textarea>
+      </div>
+      <div id="km-panel-path" class="hidden space-y-3">
+        <div>
+          <div class="flex items-center justify-between mb-1.5">
+            <p class="text-xs font-semibold text-slate-400 uppercase tracking-wider">발견된 키 파일</p>
+            <button type="button" onclick="kmScan()" class="text-xs text-indigo-500 hover:text-indigo-700">새로고침</button>
+          </div>
+          <div id="km-scan" class="max-h-40 overflow-y-auto rounded-xl border border-slate-200 bg-slate-50 p-1.5">
+            <p class="text-xs text-slate-400 text-center py-3">스캔 중...</p>
+          </div>
+        </div>
+        <div>
+          <label class="lbl">직접 경로 입력</label>
+          <input id="km-path-inp" type="text" placeholder="~/Downloads/key.pem" class="inp font-mono text-xs">
+        </div>
+      </div>
+      <!-- guide -->
+      <div class="mt-3 rounded-xl border border-slate-200 overflow-hidden">
+        <button type="button" onclick="kmGuide()" class="w-full flex items-center justify-between px-4 py-2.5 bg-slate-50 hover:bg-slate-100 transition-colors">
+          <span class="text-xs font-semibold text-slate-500 uppercase tracking-wider">키 생성 가이드</span>
+          <svg id="km-chevron" class="w-3.5 h-3.5 text-slate-400 transition-transform duration-200" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
+        </button>
+        <div id="km-guide-body" class="hidden border-t border-slate-100 px-4 py-4 space-y-4">
+          <!-- Step 1: 키 생성 -->
+          <div>
+            <div class="flex items-center gap-2 mb-1.5">
+              <span class="w-5 h-5 rounded-full bg-slate-700 text-white text-[10px] font-bold flex items-center justify-center flex-shrink-0">1</span>
+              <p class="text-[10px] font-semibold text-slate-400 uppercase tracking-wider">키 생성</p>
+            </div>
+            <p class="text-[11px] text-slate-500 mb-1.5 pl-7">RSA 4096비트 키를 생성합니다. <code class="bg-slate-100 px-1 rounded text-slate-600">.pem</code>은 개인키, <code class="bg-slate-100 px-1 rounded text-slate-600">.pem.pub</code>은 공개키입니다.</p>
+            <div class="relative group pl-7">
+              <pre id="km-keygen" class="bg-slate-900 text-emerald-400 text-[11px] font-mono rounded-lg px-3 py-2.5 overflow-x-auto whitespace-pre-wrap break-all leading-relaxed"></pre>
+              <button onclick="copyCode('km-keygen','c1')" class="absolute top-1.5 right-1.5 opacity-0 group-hover:opacity-100 bg-slate-700 hover:bg-slate-600 text-slate-300 text-[10px] px-2 py-0.5 rounded transition-opacity"><span id="c1">copy</span></button>
+            </div>
+          </div>
+          <!-- Step 2: 권한 설정 -->
+          <div>
+            <div class="flex items-center gap-2 mb-1.5">
+              <span class="w-5 h-5 rounded-full bg-slate-700 text-white text-[10px] font-bold flex items-center justify-center flex-shrink-0">2</span>
+              <p class="text-[10px] font-semibold text-slate-400 uppercase tracking-wider">권한 설정</p>
+            </div>
+            <p class="text-[11px] text-slate-500 mb-1.5 pl-7">개인키 파일은 반드시 소유자만 읽을 수 있도록 권한을 설정해야 합니다.</p>
+            <div class="relative group pl-7">
+              <pre id="km-chmod" class="bg-slate-900 text-sky-300 text-[11px] font-mono rounded-lg px-3 py-2.5 overflow-x-auto whitespace-pre-wrap break-all leading-relaxed"></pre>
+              <button onclick="copyCode('km-chmod','c3')" class="absolute top-1.5 right-1.5 opacity-0 group-hover:opacity-100 bg-slate-700 hover:bg-slate-600 text-slate-300 text-[10px] px-2 py-0.5 rounded transition-opacity"><span id="c3">copy</span></button>
+            </div>
+          </div>
+          <!-- Step 3: 서버 등록 -->
+          <div>
+            <div class="flex items-center gap-2 mb-1.5">
+              <span class="w-5 h-5 rounded-full bg-slate-700 text-white text-[10px] font-bold flex items-center justify-center flex-shrink-0">3</span>
+              <p class="text-[10px] font-semibold text-slate-400 uppercase tracking-wider">공개키를 서버에 등록</p>
+            </div>
+            <p class="text-[11px] text-slate-500 mb-1.5 pl-7">생성된 공개키를 원격 서버의 <code class="bg-slate-100 px-1 rounded text-slate-600">~/.ssh/authorized_keys</code>에 추가합니다.</p>
+            <div class="relative group pl-7">
+              <pre id="km-copyid" class="bg-slate-900 text-amber-300 text-[11px] font-mono rounded-lg px-3 py-2.5 overflow-x-auto whitespace-pre-wrap break-all leading-relaxed"></pre>
+              <button onclick="copyCode('km-copyid','c2')" class="absolute top-1.5 right-1.5 opacity-0 group-hover:opacity-100 bg-slate-700 hover:bg-slate-600 text-slate-300 text-[10px] px-2 py-0.5 rounded transition-opacity"><span id="c2">copy</span></button>
+            </div>
+            <p class="text-[11px] text-slate-400 mt-1.5 pl-7">또는 수동으로: 공개키 내용을 서버의 <code class="bg-slate-100 px-1 rounded text-slate-600">~/.ssh/authorized_keys</code>에 직접 붙여넣기</p>
+          </div>
+          <!-- Step 4: 연결 테스트 -->
+          <div>
+            <div class="flex items-center gap-2 mb-1.5">
+              <span class="w-5 h-5 rounded-full bg-slate-700 text-white text-[10px] font-bold flex items-center justify-center flex-shrink-0">4</span>
+              <p class="text-[10px] font-semibold text-slate-400 uppercase tracking-wider">연결 테스트</p>
+            </div>
+            <p class="text-[11px] text-slate-500 mb-1.5 pl-7">Workit에서 저장 후 터미널에서 바로 접속할 수 있습니다.</p>
+            <div class="relative group pl-7">
+              <pre id="km-test" class="bg-slate-900 text-violet-300 text-[11px] font-mono rounded-lg px-3 py-2.5 overflow-x-auto whitespace-pre-wrap break-all leading-relaxed"></pre>
+              <button onclick="copyCode('km-test','c4')" class="absolute top-1.5 right-1.5 opacity-0 group-hover:opacity-100 bg-slate-700 hover:bg-slate-600 text-slate-300 text-[10px] px-2 py-0.5 rounded transition-opacity"><span id="c4">copy</span></button>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="flex gap-2.5 mt-4">
+        <button type="button" onclick="kmClose()" class="flex-1 py-2.5 text-sm font-semibold text-slate-600 bg-slate-100 rounded-xl hover:bg-slate-200 transition-colors">취소</button>
+        <button type="button" id="km-save" onclick="kmSave()" class="flex-1 py-2.5 text-sm font-semibold text-white rounded-xl" style="background:#4f46e5">저장</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══ ACCOUNTS MODAL ═════════════════════════════════════ -->
+<div id="acct-modal" class="modal-wrap">
+  <div class="modal">
+    <div class="px-5 py-4 border-b border-slate-100 flex items-center justify-between">
+      <p id="acct-modal-title" class="text-sm font-bold text-slate-900">계정 추가</p>
+      <button onclick="acctCloseModal()" class="w-7 h-7 rounded-lg flex items-center justify-center text-slate-400 hover:bg-slate-100 transition-colors">
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+      </button>
+    </div>
+    <form id="acct-form" onsubmit="acctSubmit(event)" class="px-5 py-4 space-y-3.5">
+      <input type="hidden" id="acct-id">
+      <div class="grid grid-cols-2 gap-3">
+        <div><label class="lbl">이름 *</label><input id="acct-name" type="text" class="inp" placeholder="Production DB" required></div>
+        <div><label class="lbl">카테고리</label>
+          <select id="acct-cat" class="inp bg-white">
+            <option>DB</option><option>Server</option><option>API</option><option>Service</option><option>기타</option>
+          </select>
+        </div>
+      </div>
+      <div><label class="lbl">Username / ID</label><input id="acct-user" type="text" class="inp" placeholder="admin"></div>
+      <div><label class="lbl">Password / Secret</label>
+        <div class="relative">
+          <input id="acct-pw" type="password" class="inp pr-9" placeholder="••••••••">
+          <button type="button" onclick="togglePw('acct-pw')" class="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/></svg>
+          </button>
+        </div>
+      </div>
+      <div><label class="lbl">URL / Host</label><input id="acct-url" type="text" class="inp" placeholder="https://..."></div>
+      <div><label class="lbl">메모</label><textarea id="acct-notes" rows="2" class="inp resize-none" placeholder="추가 정보..."></textarea></div>
+      <div class="flex gap-2.5 pt-1">
+        <button type="button" onclick="acctCloseModal()" class="flex-1 py-2.5 text-sm font-semibold text-slate-600 bg-slate-100 rounded-xl hover:bg-slate-200 transition-colors">취소</button>
+        <button type="submit" class="flex-1 py-2.5 text-sm font-semibold text-white rounded-xl" style="background:#4f46e5">저장</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- ═══ KUBERNETES MODAL ════════════════════════════════════ -->
+<div id="kube-modal" class="modal-wrap">
+  <div class="modal" style="max-width:560px">
+    <div class="px-5 py-4 border-b border-slate-100 flex items-center justify-between flex-shrink-0">
+      <div class="flex items-center gap-2.5">
+        <div class="w-6 h-6 rounded-md flex items-center justify-center" style="background:#e0f2fe">
+          <svg class="w-3.5 h-3.5" style="color:#0369a1" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 12h14M12 5l7 7-7 7"/></svg>
+        </div>
+        <p id="kube-modal-title" class="text-sm font-bold text-slate-900">Kubernetes Context 추가</p>
+      </div>
+      <button onclick="kubeCloseModal()" class="w-7 h-7 rounded-lg flex items-center justify-center text-slate-400 hover:bg-slate-100 transition-colors">
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+      </button>
+    </div>
+
+    <!-- Step 1: Input -->
+    <div id="kube-step-input" class="px-5 py-4 space-y-4">
+      <div class="flex items-center gap-0.5 p-0.5 bg-slate-100 rounded-lg">
+        <button type="button" id="ktab-file" onclick="kubeSetInputMode('file')" class="km-tab active flex-1 text-center">파일 업로드</button>
+        <button type="button" id="ktab-text" onclick="kubeSetInputMode('text')" class="km-tab flex-1 text-center">텍스트 입력</button>
+      </div>
+      <div id="kube-file-zone">
+        <div id="kube-dz" class="dz" onclick="document.getElementById('kube-file-inp').click()"
+          ondragover="dzOver(event,'kube-dz')" ondragleave="dzLeave('kube-dz')" ondrop="dzDrop(event,'kube-dz','kube-file-inp')">
+          <svg id="kube-dz-icon" class="w-7 h-7 mx-auto mb-2 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"/></svg>
+          <p id="kube-dz-text" class="text-sm text-slate-500">kubeconfig 파일을 드래그하거나 클릭하세요</p>
+          <p class="text-xs text-slate-400 mt-1">config / *.yaml / *.yml</p>
+          <input type="file" id="kube-file-inp" class="hidden" accept=".yaml,.yml,config" onchange="dzSelect(this,'kube-dz','kube-dz-icon','kube-dz-text')">
+        </div>
+      </div>
+      <div id="kube-text-zone" class="hidden">
+        <textarea id="kube-text-inp" rows="12"
+          placeholder="apiVersion: v1&#10;kind: Config&#10;clusters:&#10;- cluster:&#10;    server: https://...&#10;  name: my-cluster&#10;contexts:&#10;- context:&#10;    cluster: my-cluster&#10;    user: my-user&#10;  name: my-context&#10;..."
+          class="w-full px-3 py-2.5 font-mono text-xs border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-sky-400/30 resize-none bg-slate-50"></textarea>
+      </div>
+      <div class="flex gap-2.5 pt-1">
+        <button type="button" onclick="kubeCloseModal()" class="flex-1 py-2.5 text-sm font-semibold text-slate-600 bg-slate-100 rounded-xl hover:bg-slate-200 transition-colors">취소</button>
+        <button type="button" id="kube-parse-btn" onclick="kubeParse()"
+          class="flex-1 py-2.5 text-sm font-semibold text-white rounded-xl transition-all" style="background:#0ea5e9">파싱하기</button>
+      </div>
+    </div>
+
+    <!-- Step 2: Parsed / Edit -->
+    <div id="kube-step-parsed" class="hidden">
+      <div class="px-5 pt-3 pb-2">
+        <p class="text-xs text-slate-400">프로젝트, 환경, 설명을 입력하고 수정이 필요한 항목을 편집한 후 추가하세요.</p>
+      </div>
+      <div id="kube-parsed-list" class="px-5 pb-2 max-h-[60vh] overflow-y-auto space-y-3"></div>
+      <div class="px-5 py-4 border-t border-slate-100 flex gap-2.5">
+        <button type="button" id="kube-back-btn" onclick="kubeBackToInput()" class="flex-1 py-2.5 text-sm font-semibold text-slate-600 bg-slate-100 rounded-xl hover:bg-slate-200 transition-colors">← 뒤로</button>
+        <button type="button" id="kube-add-btn" onclick="kubeAddParsed()"
+          class="flex-1 py-2.5 text-sm font-semibold text-white rounded-xl transition-all" style="background:#0ea5e9">추가하기</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══ UNSAVED CHANGES CONFIRM ══════════════════════════ -->
+<div id="unsaved-modal" class="modal-wrap" style="z-index:9999">
+  <div class="modal" style="max-width:320px">
+    <div class="px-5 py-5 text-center">
+      <div class="w-10 h-10 rounded-full bg-amber-100 flex items-center justify-center mx-auto mb-3">
+        <svg class="w-5 h-5 text-amber-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/></svg>
+      </div>
+      <p class="text-sm font-semibold text-slate-700">수정된 내용이 있습니다</p>
+      <p class="text-xs text-slate-400 mt-1">저장하지 않고 닫으시겠습니까?</p>
+      <div class="flex gap-2 mt-4">
+        <button onclick="unsavedDiscard()" class="flex-1 py-2 text-sm font-semibold text-slate-600 bg-slate-100 rounded-xl hover:bg-slate-200 transition-colors">그냥 닫기</button>
+        <button onclick="unsavedSave()" class="flex-1 py-2 text-sm font-semibold text-white rounded-xl transition-all" style="background:#0ea5e9">저장</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══ GUIDE MODAL ════════════════════════════════════════ -->
+<div id="guide-modal" class="modal-wrap">
+  <div class="modal" style="max-width:520px">
+    <div class="px-5 py-4 border-b border-slate-100 flex items-center justify-between">
+      <div class="flex items-center gap-2.5">
+        <div id="guide-icon" class="w-7 h-7 rounded-lg flex items-center justify-center text-white text-xs font-bold">?</div>
+        <p id="guide-title" class="text-sm font-bold text-slate-900"></p>
+      </div>
+      <button onclick="closeGuide()" class="w-7 h-7 rounded-lg flex items-center justify-center text-slate-400 hover:bg-slate-100 transition-colors">
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+      </button>
+    </div>
+    <div id="guide-body" class="px-5 py-5 space-y-5 text-sm"></div>
+  </div>
+</div>
+
+<!-- ═══ SETUP GUIDE FLOATING BUTTON ═══════════════════════ -->
+<button id="setup-float-btn" onclick="openSetupGuide()"
+  class="fixed bottom-5 left-5 z-30 flex items-center gap-2 px-3.5 py-2 bg-white border border-slate-200 rounded-xl text-xs font-semibold text-slate-500 shadow-sm hover:shadow-md hover:border-indigo-200 hover:text-indigo-600">
+  <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 9l3 3-3 3m5 0h3M5 20h14a2 2 0 002-2V6a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg>
+  초기 설정
+</button>
+
+<!-- ═══ SETUP GUIDE MODAL ══════════════════════════════════ -->
+<div id="setup-modal" class="modal-wrap">
+  <div class="modal" style="max-width:600px">
+
+    <!-- Header -->
+    <div class="px-5 py-4 border-b border-slate-100 flex items-center justify-between flex-shrink-0">
+      <div class="flex items-center gap-3">
+        <div class="w-8 h-8 rounded-xl flex items-center justify-center text-white flex-shrink-0"
+          style="background:linear-gradient(135deg,#4f46e5 0%,#06b6d4 100%)">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 9l3 3-3 3m5 0h3M5 20h14a2 2 0 002-2V6a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg>
+        </div>
+        <div>
+          <p class="text-sm font-bold text-slate-900">Workit 초기 설정 가이드</p>
+          <p class="text-xs text-slate-400 mt-0.5">스크립트를 복사해 터미널에 붙여넣으면 자동으로 설정됩니다</p>
+        </div>
+      </div>
+      <button onclick="closeSetupGuide()" class="w-7 h-7 rounded-lg flex items-center justify-center text-slate-400 hover:bg-slate-100 transition-colors">
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+      </button>
+    </div>
+
+    <!-- Body -->
+    <div class="px-5 pb-5 pt-4 space-y-3 overflow-y-auto" style="max-height:72vh">
+
+      <!-- Intro -->
+      <p class="text-[12px] text-slate-500 leading-relaxed pb-1">
+        아래 3가지 설정을 완료하면 Workit의 SSH · Kubernetes 기능을 모두 사용할 수 있습니다.<br>
+        각 단계 스크립트를 복사해 터미널에 붙여넣으면 자동으로 설정됩니다.
+      </p>
+
+      <!-- Step 1 — SSH dirs -->
+      <div class="rounded-xl border border-slate-200 overflow-hidden">
+        <div class="flex items-center gap-2.5 px-4 py-2.5 bg-slate-50 border-b border-slate-100">
+          <div class="w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-bold text-white flex-shrink-0" style="background:#4f46e5">1</div>
+          <span class="text-[10px] font-bold px-2 py-0.5 rounded-full bg-indigo-50 text-indigo-500 border border-indigo-100 flex-shrink-0">SSH</span>
+          <span class="text-[12.5px] font-semibold text-slate-800">SSH 키 폴더 및 config 설정</span>
+        </div>
+        <div class="px-4 py-3">
+          <p class="text-[11.5px] text-slate-500 leading-relaxed mb-2.5">
+            개인 키(.pem) 보관 폴더를 만들고, <strong>~/.ssh/config 파일에 Workit 설정 연동을 활성화</strong>합니다.
+            이 설정이 완료되어야 터미널에서 등록된 서버 별칭(Alias)으로 바로 접속할 수 있습니다.
+          </p>
+          <div class="relative rounded-lg overflow-hidden border border-slate-800">
+            <pre class="bg-slate-950 text-[11px] font-mono leading-relaxed px-3.5 py-2.5 overflow-x-auto select-text" style="-webkit-user-select:text;user-select:text"><span class="text-emerald-400">mkdir -p ~/.workit/data/ssh/keys/{dev,test,stg,prd}</span>
+<span class="text-sky-400">chmod 700 ~/.workit/data/ssh/keys</span>
+<span class="text-yellow-300">mkdir -p ~/.ssh</span>
+<span class="text-yellow-300">if</span> ! grep -q <span class="text-amber-300">"~/.workit/data/ssh/configs/\*.conf"</span> ~/.ssh/config 2>/dev/null; <span class="text-yellow-300">then</span>
+  <span class="text-emerald-400">echo "Include ~/.workit/data/ssh/configs/*.conf" | cat - ~/.ssh/config 2>/dev/null > /tmp/w_ssh && mv /tmp/w_ssh ~/.ssh/config && chmod 600 ~/.ssh/config</span>
+<span class="text-yellow-300">fi</span>
+<span class="text-slate-500">echo "✓  ~/.ssh/config Include 및 키 폴더 설정 완료"</span></pre>
+            <button onclick="copyStep(1,this)" class="absolute top-1.5 right-1.5 px-2 py-0.5 rounded text-[10px] font-semibold bg-slate-700 hover:bg-indigo-600 text-slate-300 hover:text-white transition-colors">복사</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Step 2 — kube configs dir -->
+      <div class="rounded-xl border border-slate-200 overflow-hidden">
+        <div class="flex items-center gap-2.5 px-4 py-2.5 bg-slate-50 border-b border-slate-100">
+          <div class="w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-bold text-white flex-shrink-0" style="background:#0284c7">2</div>
+          <span class="text-[10px] font-bold px-2 py-0.5 rounded-full bg-sky-50 text-sky-500 border border-sky-100 flex-shrink-0">Kubernetes</span>
+          <span class="text-[12.5px] font-semibold text-slate-800">Kubeconfig 디렉토리 생성</span>
+        </div>
+        <div class="px-4 py-3">
+          <p class="text-[11.5px] text-slate-500 leading-relaxed mb-2.5">
+            여러 클러스터의 kubeconfig 파일을 <strong>하나의 디렉토리에서 관리</strong>합니다.
+            Workit에서 context를 등록하면 이 폴더에 파일이 저장되고, Step 3의 함수가 자동으로 인식합니다.
+          </p>
+          <div class="relative rounded-lg overflow-hidden border border-slate-800">
+            <pre class="bg-slate-950 text-[11px] font-mono leading-relaxed px-3.5 py-2.5 overflow-x-auto select-text" style="-webkit-user-select:text;user-select:text"><span class="text-emerald-400">mkdir -p ~/.workit/data/kube/configs</span>
+<span class="text-slate-500">echo "✓  kubeconfig 디렉토리: ~/.workit/data/kube/configs"</span></pre>
+            <button onclick="copyStep(2,this)" class="absolute top-1.5 right-1.5 px-2 py-0.5 rounded text-[10px] font-semibold bg-slate-700 hover:bg-sky-600 text-slate-300 hover:text-white transition-colors">복사</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Step 3 — KUBECONFIG function in zshrc -->
+      <div class="rounded-xl border border-slate-200 overflow-hidden">
+        <div class="flex items-center gap-2.5 px-4 py-2.5 bg-slate-50 border-b border-slate-100">
+          <div class="w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-bold text-white flex-shrink-0" style="background:#0284c7">3</div>
+          <span class="text-[10px] font-bold px-2 py-0.5 rounded-full bg-sky-50 text-sky-500 border border-sky-100 flex-shrink-0">Kubernetes</span>
+          <span class="text-[12.5px] font-semibold text-slate-800">KUBECONFIG 환경변수 설정</span>
+        </div>
+        <div class="px-4 py-3">
+          <p class="text-[11.5px] text-slate-500 leading-relaxed mb-2.5">
+            <code class="bg-slate-100 text-slate-700 px-1 py-0.5 rounded font-mono text-[10.5px]">~/.workit/data/kube/configs/</code> 안의 모든 <code class="bg-slate-100 text-slate-700 px-1 py-0.5 rounded font-mono text-[10.5px]">.yaml</code> 파일을
+            <strong>kubectl이 자동으로 인식</strong>하도록 <code class="bg-slate-100 text-slate-700 px-1 py-0.5 rounded font-mono text-[10.5px]">~/.zshrc</code>에 함수를 추가합니다.
+            새 kubeconfig를 추가한 후에는 <code class="bg-slate-100 text-slate-700 px-1 py-0.5 rounded font-mono text-[10.5px]">kubereload</code>를 실행하면 셸 재시작 없이 즉시 반영됩니다.
+          </p>
+          <div class="relative rounded-lg overflow-hidden border border-slate-800">
+            <pre class="bg-slate-950 text-[11px] font-mono leading-relaxed px-3.5 py-2.5 overflow-x-auto select-text" style="-webkit-user-select:text;user-select:text"><span class="text-yellow-300">if</span> ! grep -q <span class="text-amber-300">"_load_kubeconfigs"</span> ~/.zshrc 2>/dev/null; <span class="text-yellow-300">then</span>
+  cat >> ~/.zshrc &lt;&lt; <span class="text-amber-300">'EOF'</span>
+
+<span class="text-slate-500"># Workit — Kubernetes 멀티 컨텍스트 자동 로드</span>
+<span class="text-sky-300">_load_kubeconfigs()</span> {
+  <span class="text-yellow-300">if</span> [ -d ~/.workit/data/kube/configs ]; <span class="text-yellow-300">then</span>
+    <span class="text-emerald-400">export</span> <span class="text-sky-200">KUBECONFIG</span>=~/.kube/config:<span class="text-violet-300">$(</span>find ~/.workit/data/kube/configs -type f -name <span class="text-amber-300">"*.yaml"</span> | sort | tr <span class="text-amber-300">'\n'</span> <span class="text-amber-300">':'</span><span class="text-violet-300">)</span>
+  <span class="text-yellow-300">fi</span>
+}
+<span class="text-sky-300">_load_kubeconfigs</span>
+<span class="text-emerald-400">alias</span> <span class="text-sky-200">kubereload</span>=<span class="text-amber-300">"_load_kubeconfigs &amp;&amp; echo 'KUBECONFIG reloaded'"</span>
+<span class="text-amber-300">EOF</span>
+  echo <span class="text-amber-300">"✓  KUBECONFIG 함수 추가: ~/.zshrc"</span>
+<span class="text-yellow-300">else</span>
+  echo <span class="text-amber-300">"ℹ  이미 설정되어 있습니다 (_load_kubeconfigs)"</span>
+<span class="text-yellow-300">fi</span>
+
+<span class="text-sky-400">source ~/.zshrc</span> 2>/dev/null || true</pre>
+            <button onclick="copyStep(3,this)" class="absolute top-1.5 right-1.5 px-2 py-0.5 rounded text-[10px] font-semibold bg-slate-700 hover:bg-sky-600 text-slate-300 hover:text-white transition-colors">복사</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- All-in-one copy -->
+      <div class="pt-1">
+        <button id="setup-copy-btn" onclick="copySetupScript()"
+          class="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl text-[12.5px] font-semibold text-white transition-all hover:opacity-90"
+          style="background:linear-gradient(135deg,#4f46e5 0%,#0284c7 100%)">
+          <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"/></svg>
+          <span id="setup-copy-label">전체 스크립트 (1+2+3) 한 번에 복사</span>
+        </button>
+        <p class="text-center text-[10.5px] text-slate-400 mt-2">복사 후 터미널에 붙여넣으면 3단계가 한 번에 완료됩니다</p>
+      </div>
+
+    </div><!-- /body -->
+  </div>
