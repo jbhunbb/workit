@@ -396,6 +396,36 @@ function _renderMd(raw) {
     out.push(`</${listType}>`);
     listType = null; listBuf = [];
   }
+
+  let inTable = false, tableHeaders = [], tableRows = [];
+  function flushTable() {
+    if (!inTable) return;
+    let html = '<div class="overflow-x-auto my-3"><table>';
+    if (tableHeaders.length) {
+      html += '<thead><tr>';
+      tableHeaders.forEach(h => {
+        html += `<th>${_mdInline(h)}</th>`;
+      });
+      html += '</tr></thead>';
+    }
+    if (tableRows.length) {
+      html += '<tbody>';
+      tableRows.forEach(row => {
+        html += '<tr>';
+        row.forEach(cell => {
+          html += `<td>${_mdInline(cell)}</td>`;
+        });
+        html += '</tr>';
+      });
+      html += '</tbody>';
+    }
+    html += '</table></div>';
+    out.push(html);
+    inTable = false;
+    tableHeaders = [];
+    tableRows = [];
+  }
+
   for (const line of lines) {
     if (inCode) {
       if (/^```/.test(line)) { out.push(`<pre><code${codeLang?` class="lang-${codeLang}"`:''}>${_mdEsc(codeLines.join('\n'))}</code></pre>`); inCode=false; codeLines=[]; }
@@ -403,7 +433,28 @@ function _renderMd(raw) {
       continue;
     }
     const fence = line.match(/^```(\w*)/);
-    if (fence) { flushList(); inCode=true; codeLang=fence[1]; continue; }
+    if (fence) { flushList(); flushTable(); inCode=true; codeLang=fence[1]; continue; }
+
+    // Check if GFM table row
+    const isTableLine = /^\s*\|(.*)\|\s*$/.test(line);
+    if (isTableLine) {
+      flushList();
+      const isSeparator = /^\s*\|(?:\s*:?-+:?\s*\|)+\s*$/.test(line);
+      if (!inTable) {
+        if (!isSeparator) {
+          inTable = true;
+          tableHeaders = line.split('|').map(c => c.trim()).slice(1, -1);
+        }
+      } else {
+        if (!isSeparator) {
+          tableRows.push(line.split('|').map(c => c.trim()).slice(1, -1));
+        }
+      }
+      continue;
+    } else {
+      flushTable();
+    }
+
     const hm = line.match(/^(#{1,6}) (.*)/);
     if (hm) {
       flushList();
@@ -418,10 +469,12 @@ function _renderMd(raw) {
     if (ul) { if (listType!=='ul'){flushList();listType='ul';} listBuf.push(ul[1]); continue; }
     const ol = line.match(/^\d+\. (.*)/);
     if (ol) { if (listType!=='ol'){flushList();listType='ol';} listBuf.push(ol[1]); continue; }
+
     flushList();
     if (line.trim()) out.push(`<p>${_mdInline(line)}</p>`);
   }
   flushList();
+  flushTable();
   if (inCode && codeLines.length) out.push(`<pre><code>${_mdEsc(codeLines.join('\n'))}</code></pre>`);
   return out.join('\n');
 }

@@ -383,6 +383,12 @@ body.dark .docs-item.active .docs-item-title { color: var(--accent-docs); }
 .md-body hr { border: none; border-top: 1px solid var(--border-color); margin: 20px 0; }
 .md-body strong { font-weight: 700; }
 .md-body em { font-style: italic; }
+.md-body table { width: 100%; border-collapse: collapse; margin: 16px 0; font-size: 13px; }
+.md-body th, .md-body td { border: 1px solid var(--border-color); padding: 8px 12px; text-align: left; }
+.md-body th { background-color: var(--bg-body); font-weight: 600; color: var(--text-dark); }
+.md-body td { color: var(--text-gray-dark); }
+.md-body tr:hover { background-color: rgba(99, 102, 241, 0.04); }
+body.dark .md-body tr:hover { background-color: rgba(129, 140, 248, 0.04); }
 
 body.dark .md-body { color: var(--text-semi); }
 body.dark .md-body h1, body.dark .md-body h2, body.dark .md-body h3 { color: var(--text-dark); }
