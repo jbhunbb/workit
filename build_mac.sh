@@ -48,18 +48,31 @@ echo "[4/5] Building Workit.app..."
   --noconfirm \
   main.py
 
-# ── Build .zip ────────────────────────────────────────────────
-echo "[5/5] Building Workit.zip..."
+# ── Build .dmg ────────────────────────────────────────────────
+echo "[5/5] Building Workit.dmg..."
 
-ZIP_OUT="dist/Workit.zip"
-rm -f "$ZIP_OUT"
-ditto -c -k --keepParent dist/Workit.app "$ZIP_OUT"
+DMG_TMP="dist/dmg_tmp"
+DMG_OUT="dist/Workit.dmg"
+rm -rf "$DMG_TMP" "$DMG_OUT"
+mkdir -p "$DMG_TMP"
+cp -r dist/Workit.app "$DMG_TMP/"
+ln -s /Applications "$DMG_TMP/Applications"
+
+hdiutil create \
+  -volname "Workit" \
+  -srcfolder "$DMG_TMP" \
+  -ov \
+  -format UDZO \
+  -fs HFS+ \
+  "$DMG_OUT"
+
+rm -rf "$DMG_TMP"
 
 echo ""
 echo "=== 빌드 완료 ==="
 echo ""
 echo "  App : dist/Workit.app"
-echo "  ZIP : dist/Workit.zip"
+echo "  DMG : dist/Workit.dmg"
 echo ""
-echo "설치: Workit.zip 압축 해제 후 Workit.app을 /Applications로 이동"
+echo "설치: DMG를 열고 Workit.app을 /Applications로 드래그"
 echo "데이터: ~/.workit/  |  로그: ~/.workit/logs/workit.log"
