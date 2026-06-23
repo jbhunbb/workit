@@ -54,21 +54,6 @@
 
     <!-- Right action (context) -->
     <div class="ml-auto flex items-center gap-2" id="header-actions">
-      <!-- Font scale -->
-      <div class="relative" id="font-scale-wrap">
-        <button onclick="toggleFontScaleMenu()" title="글씨 크기"
-          class="h-7 px-2 rounded-full text-[11px] font-bold text-slate-400 border border-slate-200 hover:border-slate-400 hover:text-slate-600 transition-all">Aa</button>
-        <div id="font-scale-menu" class="hidden absolute right-0 top-9 bg-white border border-slate-200 rounded-xl shadow-lg py-1 z-50" style="min-width:120px">
-          <button onclick="setFontScale(0.85)" class="font-scale-opt w-full text-left px-3 py-1.5 text-xs hover:bg-slate-50 transition-colors" data-scale="0.85">작게 (85%)</button>
-          <button onclick="setFontScale(1.0)" class="font-scale-opt w-full text-left px-3 py-1.5 text-xs hover:bg-slate-50 transition-colors" data-scale="1.0">보통 (100%)</button>
-          <button onclick="setFontScale(1.1)" class="font-scale-opt w-full text-left px-3 py-1.5 text-xs hover:bg-slate-50 transition-colors" data-scale="1.1">크게 (110%)</button>
-          <button onclick="setFontScale(1.2)" class="font-scale-opt w-full text-left px-3 py-1.5 text-xs hover:bg-slate-50 transition-colors" data-scale="1.2">더 크게 (120%)</button>
-        </div>
-      </div>
-      <!-- Theme toggle (always visible) -->
-      <button id="theme-btn" onclick="toggleTheme()" title="테마 전환"
-        class="w-7 h-7 rounded-full flex items-center justify-center text-slate-400 border border-slate-200 hover:border-slate-400 hover:text-slate-600 transition-all">
-      </button>
       <!-- SSH actions -->
       <div id="actions-ssh" class="flex items-center gap-2">
         <button onclick="openGuide('ssh')" title="가이드" class="w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold text-slate-400 border border-slate-200 hover:border-slate-400 hover:text-slate-600 transition-all">?</button>
@@ -150,6 +135,20 @@
   {% include 'accounts_tab.html' %}
   {% include 'docs_tab.html' %}
 </main>
+
+<!-- Floating action group (bottom right) -->
+<div id="floating-actions" class="fixed bottom-6 right-6 z-30 flex items-center gap-2 bg-white/90 dark:bg-slate-900/90 backdrop-blur border border-slate-200 dark:border-slate-800 rounded-full px-2.5 py-1.5 shadow-lg select-none">
+  <!-- Zoom Reset indicator -->
+  <button id="zoom-indicator" onclick="setFontScale(1.0)" title="비율 초기화 (Cmd+0)"
+    class="h-7 px-2 rounded-full text-[11px] font-bold text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 transition-all">
+    100%
+  </button>
+  <div class="w-px h-4 bg-slate-200 dark:bg-slate-800"></div>
+  <!-- Theme toggle -->
+  <button id="theme-btn" onclick="toggleTheme()" title="테마 전환"
+    class="w-7 h-7 rounded-full flex items-center justify-center text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 transition-all">
+  </button>
+</div>
 
 {% include 'drawers_modals.html' %}
 

@@ -174,14 +174,6 @@ async function sshLoad() {
 }
 
 // ── Font scale ────────────────────────────────────────────────
-function toggleFontScaleMenu() {
-  document.getElementById('font-scale-menu').classList.toggle('hidden');
-}
-document.addEventListener('click', e => {
-  const wrap = document.getElementById('font-scale-wrap');
-  if (wrap && !wrap.contains(e.target))
-    document.getElementById('font-scale-menu').classList.add('hidden');
-});
 function setFontScale(scale) {
   document.body.style.zoom = scale;
   document.documentElement.style.setProperty('--bz', scale);
@@ -200,6 +192,10 @@ function _updateFontScaleUI(scale) {
   document.querySelectorAll('.font-scale-opt').forEach(b => {
     b.classList.toggle('active', parseFloat(b.dataset.scale) === parseFloat(scale));
   });
+  const indicator = document.getElementById('zoom-indicator');
+  if (indicator) {
+    indicator.textContent = `${Math.round(scale * 100)}%`;
+  }
 }
 
 // ── Guide ─────────────────────────────────────────────────────

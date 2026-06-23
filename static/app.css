@@ -419,3 +419,11 @@ code {
   -webkit-user-select: text !important;
   user-select: text !important;
 }
+
+/* ── Floating Actions ── */
+#floating-actions {
+  position: fixed !important;
+  bottom: 24px !important;
+  right: 24px !important;
+  zoom: 1 !important;
+}
