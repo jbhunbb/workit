@@ -340,21 +340,34 @@ async function kubeParse() {
     if (!t) { toast('내용을 입력하세요', false); btn.disabled = false; btn.textContent = '파싱하기'; return; }
     fd.append('text', t);
   }
+  let ok = false;
+  let errorMsg = '';
+  let responseData = null;
+
   try {
     const r = await fetch('/api/kube/parse', { method: 'POST', body: fd });
-    const d = await r.json();
-    if (!r.ok) {
-      alert("YAML 파싱 실패:\n" + (d.error || '파싱 실패'));
-      toast(d.error || '파싱 실패', false);
-      return;
+    responseData = await r.json();
+    ok = r.ok;
+    if (!ok) {
+      errorMsg = responseData.error || '파싱 실패';
     }
-    kubeParsed = d.contexts.map(c => ({ ...c, _selected: true }));
-    kubeShowParsed();
-  } catch {
+  } catch (err) {
     alert("네트워크 오류로 파싱에 실패했습니다.");
     toast('네트워크 오류', false);
+    btn.disabled = false; btn.textContent = '파싱하기';
+    return;
   }
-  finally { btn.disabled = false; btn.textContent = '파싱하기'; }
+
+  btn.disabled = false; btn.textContent = '파싱하기';
+
+  if (!ok) {
+    alert("YAML 파싱 실패:\n" + errorMsg);
+    toast(errorMsg, false);
+    return;
+  }
+
+  kubeParsed = responseData.contexts.map(c => ({ ...c, _selected: true }));
+  kubeShowParsed();
 }
 
 function kubeShowParsed() {
