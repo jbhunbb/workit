@@ -42,3 +42,25 @@ window.addEventListener('keydown', (e) => {
     setFontScale(1.0);
   }
 }, { capture: true });
+
+// Check for updates on startup
+setTimeout(() => {
+  fetch('/api/check_update')
+    .then(r => r.json())
+    .then(d => {
+      if (d.has_update) {
+        const msg = `새로운 버전(v${d.latest_version})이 출시되었습니다. 업데이트를 진행하시겠습니까?\n\n` +
+                    `현재 버전: v${d.current_version}\n` +
+                    `최신 버전: v${d.latest_version}\n\n` +
+                    `[업데이트 내용]\n${d.release_notes || '설명이 없습니다.'}`;
+        if (confirm(msg)) {
+          fetch('/api/open_url', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ url: d.html_url })
+          });
+        }
+      }
+    })
+    .catch(err => console.error('Update check failed:', err));
+}, 1500);

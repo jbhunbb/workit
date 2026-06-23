@@ -5,7 +5,9 @@ from flask import Flask, request, jsonify, render_template
 from pathlib import Path
 from collections import defaultdict
 from datetime import datetime
-import yaml, json, os, sys, shutil, uuid, re
+import yaml, json, os, sys, shutil, uuid, re, urllib.request, webbrowser
+
+APP_VERSION = "1.0.1"
 
 # When bundled with PyInstaller, templates/static live in sys._MEIPASS.
 # Data always lives in ~/.workit/data/ (user-writable, persists across updates).
@@ -527,14 +529,16 @@ def _remove_from_kube_config(ctx_name: str):
 def index():
     from flask import make_response
     theme = _load_settings().get("theme", "light")
-    resp  = make_response(render_template("index.html", theme=theme))
+    resp  = make_response(render_template("index.html", theme=theme, version=APP_VERSION))
     resp.headers["Cache-Control"] = "no-store"
     return resp
 
 
 @app.route("/api/settings")
 def settings_get():
-    return jsonify(_load_settings())
+    data = _load_settings()
+    data["version"] = APP_VERSION
+    return jsonify(data)
 
 
 @app.route("/api/settings", methods=["POST"])
@@ -544,6 +548,56 @@ def settings_set():
     data.update({k: v for k, v in body.items() if k in ("theme", "font_scale")})
     _save_settings(data)
     return jsonify(data)
+
+
+@app.route("/api/check_update")
+def check_update():
+    try:
+        req = urllib.request.Request(
+            "https://api.github.com/repos/jbhunbb/workit/releases/latest",
+            headers={"User-Agent": "Workit-App"}
+        )
+        with urllib.request.urlopen(req, timeout=3) as r:
+            if r.status == 200:
+                data = json.loads(r.read().decode())
+                latest_version = data.get("tag_name", "").strip().lstrip("v")
+                html_url = data.get("html_url", "")
+                
+                # Check version components
+                has_update = False
+                try:
+                    curr_parts = [int(x) for x in APP_VERSION.split(".")]
+                    late_parts = [int(x) for x in latest_version.split(".")]
+                    if late_parts > curr_parts:
+                        has_update = True
+                except ValueError:
+                    if latest_version and latest_version != APP_VERSION:
+                        has_update = True
+                        
+                return jsonify({
+                    "current_version": APP_VERSION,
+                    "latest_version": latest_version,
+                    "has_update": has_update,
+                    "html_url": html_url,
+                    "release_notes": data.get("body", "")
+                })
+    except Exception as e:
+        app.logger.error(f"Failed to check update: {e}")
+    return jsonify({
+        "current_version": APP_VERSION,
+        "latest_version": APP_VERSION,
+        "has_update": False
+    })
+
+
+@app.route("/api/open_url", methods=["POST"])
+def open_url():
+    body = request.get_json() or {}
+    url = body.get("url")
+    if url:
+        webbrowser.open(url)
+        return jsonify({"ok": True})
+    return jsonify({"error": "No url provided"}), 400
 
 
 # ── SSH ───────────────────────────────────────────────────────
