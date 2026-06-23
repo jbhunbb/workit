@@ -14,3 +14,4 @@ data/kube/contexts.json
 build/
 dist/
 *.spec
+*.icns
