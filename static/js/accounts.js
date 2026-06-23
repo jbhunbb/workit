@@ -50,14 +50,14 @@ function acctRow(a) {
     <td class="px-4 py-3">
       ${a.username ? `<div class="flex items-center gap-1.5 font-mono text-[12.5px] text-slate-700">
         ${esc(a.username)}
-        <button onclick="copyText('${eA(a.username)}')" class="text-slate-300 hover:text-indigo-500 transition-colors">${cpI}</button>
+        <button onclick="copyText('${eA(a.username)}',this)" class="text-slate-300 hover:text-indigo-500 transition-colors">${cpI}</button>
       </div>` : `<span class="text-slate-300 text-xs">—</span>`}
     </td>
     <td class="px-4 py-3">
       ${a.password ? `<div class="flex items-center gap-1.5 font-mono text-[12.5px] text-slate-700">
         <span id="pw-${a.id}" class="tracking-widest select-none">••••••</span>
         <button onclick="acctReveal('${eA(a.id)}','${eA(a.password)}')" class="text-slate-300 hover:text-indigo-500 transition-colors">${eyeI}</button>
-        <button onclick="copyText('${eA(a.password)}')" class="text-slate-300 hover:text-indigo-500 transition-colors">${cpI}</button>
+        <button onclick="copyText('${eA(a.password)}',this)" class="text-slate-300 hover:text-indigo-500 transition-colors">${cpI}</button>
       </div>` : `<span class="text-slate-300 text-xs">—</span>`}
     </td>
     <td class="px-4 py-3 text-xs text-slate-400 max-w-[160px]">
@@ -99,7 +99,9 @@ function acctCloseModal() { document.getElementById('acct-modal').classList.remo
 async function acctSubmit(e) {
   e.preventDefault();
   const id=document.getElementById('acct-id').value;
-  const payload={name:document.getElementById('acct-name').value.trim(),category:document.getElementById('acct-cat').value,username:document.getElementById('acct-user').value.trim(),password:document.getElementById('acct-pw').value.trim(),url:document.getElementById('acct-url').value.trim(),notes:document.getElementById('acct-notes').value.trim()};
+  const name=document.getElementById('acct-name').value.trim();
+  if (!name) { toast('이름을 입력해주세요', false); document.getElementById('acct-name').focus(); return; }
+  const payload={name,category:document.getElementById('acct-cat').value,username:document.getElementById('acct-user').value.trim(),password:document.getElementById('acct-pw').value.trim(),url:document.getElementById('acct-url').value.trim(),notes:document.getElementById('acct-notes').value.trim()};
   const r=await fetch(id?`/api/accounts/${id}`:'/api/accounts',{method:id?'PUT':'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
   if(r.ok){toast(id?'수정됨':'추가됨');acctCloseModal();await acctLoad();}
   else{const d=await r.json();toast(d.error||'오류',false);}

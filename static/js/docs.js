@@ -252,6 +252,9 @@ function openGuide(tab) {
 function closeGuide() { document.getElementById('guide-modal').classList.remove('open'); }
 function copyGuideCmd(btn, text) {
   navigator.clipboard.writeText(text).then(() => {
-    btn.textContent = '✓ copied'; setTimeout(() => btn.textContent = 'copy', 1800);
+    btn.textContent = '✓ 복사됨';
+    btn.classList.add('copy-done');
+    setTimeout(() => { btn.textContent = 'copy'; btn.classList.remove('copy-done'); }, 1800);
+    toast('복사됨');
   });
 }

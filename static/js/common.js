@@ -50,10 +50,20 @@ function toast(msg, ok = true) {
 function esc(s) { return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
 function eA(s)  { return String(s||'').replace(/\\/g,'\\\\').replace(/'/g,"\\'"); }
 function togglePw(id) { const i = document.getElementById(id); i.type = i.type === 'password' ? 'text' : 'password'; }
-function copyText(t) { navigator.clipboard.writeText(t).then(() => toast('복사됨')); }
+function copyText(t, btn) {
+  navigator.clipboard.writeText(t).then(() => {
+    toast('복사됨');
+    if (btn) { btn.classList.add('copy-done'); setTimeout(() => btn.classList.remove('copy-done'), 1800); }
+  });
+}
 function copyCode(id, spanId) {
   navigator.clipboard.writeText(document.getElementById(id).innerText).then(() => {
-    const s = document.getElementById(spanId); s.textContent = '✓'; setTimeout(() => s.textContent = 'copy', 1800);
+    const s = document.getElementById(spanId);
+    const btn = s.closest('button');
+    s.textContent = '✓';
+    if (btn) btn.classList.add('copy-done');
+    setTimeout(() => { s.textContent = 'copy'; if (btn) btn.classList.remove('copy-done'); }, 1800);
+    toast('복사됨');
   });
 }
 
@@ -91,11 +101,11 @@ function envBadge(env) {
 const _cpSvg = `<svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"/></svg>`;
 function _cp(val, cls = '') {
   if (!val) return `<span class="text-slate-300 text-xs">—</span>`;
-  return `<span class="inline-flex items-center gap-1 ${cls}"><span>${esc(val)}</span><button class="copy-btn" onclick="event.stopPropagation();copyText('${eA(val)}')" title="복사">${_cpSvg}</button></span>`;
+  return `<span class="inline-flex items-center gap-1 ${cls}"><span>${esc(val)}</span><button class="copy-btn" onclick="event.stopPropagation();copyText('${eA(val)}',this)" title="복사">${_cpSvg}</button></span>`;
 }
 function _cpAs(display, copyVal, cls = '') {
   if (!display) return `<span class="text-slate-300 text-xs">—</span>`;
-  return `<span class="inline-flex items-center gap-1 ${cls}"><span>${esc(display)}</span><button class="copy-btn" onclick="event.stopPropagation();copyText('${eA(copyVal)}')" title="URL 복사">${_cpSvg}</button></span>`;
+  return `<span class="inline-flex items-center gap-1 ${cls}"><span>${esc(display)}</span><button class="copy-btn" onclick="event.stopPropagation();copyText('${eA(copyVal)}',this)" title="URL 복사">${_cpSvg}</button></span>`;
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -160,6 +170,12 @@ function _refreshSpin(btnId, fn) {
 }
 async function sshRefresh()  { await _refreshSpin('ssh-refresh-btn',  sshLoad); }
 async function kubeRefresh() { await _refreshSpin('kube-refresh-btn', kubeLoad); }
+
+function _fetchTimeout(url, opts, ms=15000) {
+  const ctrl = new AbortController();
+  const id = setTimeout(() => ctrl.abort(), ms);
+  return fetch(url, { ...opts, signal: ctrl.signal }).finally(() => clearTimeout(id));
+}
 
 async function sshLoad() {
   try {
@@ -279,52 +295,112 @@ const GUIDES = {
 };
 
 // ── Setup Guide ───────────────────────────────────────────────
-function openSetupGuide()  { document.getElementById('setup-modal').classList.add('open'); }
+let _setupStatus = { step1: false, step2: false, step3: false };
+
+function openSetupGuide() {
+  document.getElementById('setup-modal').classList.add('open');
+  fetch('/api/setup_status').then(r => r.json()).then(d => {
+    _setupStatus = d;
+    _renderSetupStatus(d);
+  }).catch(() => {});
+}
 function closeSetupGuide() { document.getElementById('setup-modal').classList.remove('open'); }
+
+function _renderSetupStatus(d) {
+  const doneColor = '#10b981';
+  [1, 2, 3].forEach(n => {
+    const done    = d[`step${n}`];
+    const stepEl  = document.getElementById(`setup-step-${n}`);
+    const numEl   = document.getElementById(`setup-num-${n}`);
+    const statusEl= document.getElementById(`setup-status-${n}`);
+    const bodyEl  = document.getElementById(`setup-body-${n}`);
+    if (!stepEl) return;
+    if (done) {
+      stepEl.style.opacity   = '0.55';
+      if (numEl)   { numEl.style.background = doneColor; numEl.textContent = '✓'; }
+      statusEl?.classList.remove('hidden');
+      bodyEl?.classList.add('pointer-events-none');
+    } else {
+      stepEl.style.opacity   = '1';
+      statusEl?.classList.add('hidden');
+      bodyEl?.classList.remove('pointer-events-none');
+    }
+  });
+
+  const allDone   = d.step1 && d.step2 && d.step3;
+  const pending   = [1,2,3].filter(n => !d[`step${n}`]);
+  document.getElementById('setup-all-done')?.classList.toggle('hidden', !allDone);
+  document.getElementById('setup-copy-wrap')?.classList.toggle('hidden', allDone);
+
+  if (!allDone) {
+    const lbl = document.getElementById('setup-copy-label');
+    if (lbl) {
+      lbl.textContent = pending.length < 3
+        ? `미완료 스크립트 (${pending.join('·')}단계) 한 번에 복사`
+        : '전체 스크립트 (1+2+3) 한 번에 복사';
+    }
+  }
+}
+
 function copySetupScript() {
+  const pending = [1,2,3].filter(n => !_setupStatus[`step${n}`]);
+  const scripts = {
+    1: [
+      '# 1. SSH 키 디렉토리 및 ~/.ssh/config Include 설정',
+      'mkdir -p ~/.workit/data/ssh/keys/{dev,test,stg,prd}',
+      'chmod 700 ~/.workit/data/ssh/keys',
+      'mkdir -p ~/.ssh',
+      'if ! grep -q "~/.workit/data/ssh/configs/*.conf" ~/.ssh/config 2>/dev/null; then',
+      '  (echo "Include ~/.workit/data/ssh/configs/*.conf"; cat ~/.ssh/config 2>/dev/null) > /tmp/w_ssh && mv /tmp/w_ssh ~/.ssh/config && chmod 600 ~/.ssh/config',
+      'fi',
+      'echo "✓  ~/.ssh/config Include 및 키 폴더 설정 완료"',
+    ].join('\n'),
+    2: [
+      '# 2. Kubernetes kubeconfig 디렉토리 생성',
+      'mkdir -p ~/.workit/data/kube/configs',
+      'echo "✓  kubeconfig 디렉토리: ~/.workit/data/kube/configs"',
+    ].join('\n'),
+    3: [
+      "# 3. ~/.zshrc에 KUBECONFIG 함수 추가 (중복 방지)",
+      'if ! grep -q "_load_kubeconfigs" ~/.zshrc 2>/dev/null; then',
+      "  cat >> ~/.zshrc << 'EOF'",
+      '',
+      '# Workit — Kubernetes 멀티 컨텍스트 자동 로드',
+      '_load_kubeconfigs() {',
+      '  if [ -d ~/.workit/data/kube/configs ]; then',
+      "    export KUBECONFIG=~/.kube/config:$(find ~/.workit/data/kube/configs -type f -name \"*.yaml\" | sort | tr '\\n' ':')",
+      '  fi',
+      '}',
+      '_load_kubeconfigs',
+      "alias kubereload=\"_load_kubeconfigs && echo 'KUBECONFIG reloaded'\"",
+      'EOF',
+      '  echo "✓  KUBECONFIG 함수 추가: ~/.zshrc"',
+      'else',
+      '  echo "ℹ  이미 설정되어 있습니다 (_load_kubeconfigs)"',
+      'fi',
+      '',
+      'source ~/.zshrc 2>/dev/null || true',
+    ].join('\n'),
+  };
   const raw = [
     '# ─── Workit 초기 설정 ─────────────────────────────────────────',
     '# 이 스크립트를 터미널에 붙여넣으면 자동으로 설정됩니다',
     '',
-    '# 1. SSH 키 디렉토리 및 ~/.ssh/config Include 설정',
-    'mkdir -p ~/.workit/data/ssh/keys/{dev,test,stg,prd}',
-    'chmod 700 ~/.workit/data/ssh/keys',
-    'mkdir -p ~/.ssh',
-    'if ! grep -q "~/.workit/data/ssh/configs/*.conf" ~/.ssh/config 2>/dev/null; then',
-    '  (echo "Include ~/.workit/data/ssh/configs/*.conf"; cat ~/.ssh/config 2>/dev/null) > /tmp/w_ssh && mv /tmp/w_ssh ~/.ssh/config && chmod 600 ~/.ssh/config',
-    'fi',
-    'echo "✓  ~/.ssh/config Include 및 키 폴더 설정 완료"',
+    ...pending.map(n => scripts[n]),
     '',
-    '# 2. Kubernetes kubeconfig 디렉토리 생성',
-    'mkdir -p ~/.workit/data/kube/configs',
-    'echo "✓  kubeconfig 디렉토리: ~/.workit/data/kube/configs"',
-    '',
-    "# 3. ~/.zshrc에 KUBECONFIG 함수 추가 (중복 방지)",
-    'if ! grep -q "_load_kubeconfigs" ~/.zshrc 2>/dev/null; then',
-    "  cat >> ~/.zshrc << 'EOF'",
-    '',
-    '# Workit — Kubernetes 멀티 컨텍스트 자동 로드',
-    '_load_kubeconfigs() {',
-    '  if [ -d ~/.workit/data/kube/configs ]; then',
-    "    export KUBECONFIG=~/.kube/config:$(find ~/.workit/data/kube/configs -type f -name \"*.yaml\" | sort | tr '\\n' ':')",
-    '  fi',
-    '}',
-    '_load_kubeconfigs',
-    "alias kubereload=\"_load_kubeconfigs && echo 'KUBECONFIG reloaded'\"",
-    'EOF',
-    '  echo "✓  KUBECONFIG 함수 추가: ~/.zshrc"',
-    'else',
-    '  echo "ℹ  KUBECONFIG 설정 이미 존재함 (_load_kubeconfigs)"',
-    'fi',
-    '',
-    'source ~/.zshrc 2>/dev/null || true',
     'echo ""',
     'echo "🎉  완료! Workit 앱을 재시작하면 변경사항이 반영됩니다."',
   ].join('\n');
+  const copyBtn = document.getElementById('setup-copy-btn');
   navigator.clipboard.writeText(raw).then(() => {
     const lbl = document.getElementById('setup-copy-label');
-    lbl.textContent = '✓ 복사됨';
-    setTimeout(() => lbl.textContent = '전체 스크립트 (1+2+3) 한 번에 복사', 2000);
+    const orig = lbl?.textContent;
+    if (lbl) lbl.textContent = '✓ 복사됨';
+    if (copyBtn) copyBtn.classList.add('copy-done');
+    setTimeout(() => {
+      if (lbl) lbl.textContent = orig;
+      if (copyBtn) copyBtn.classList.remove('copy-done');
+    }, 2000);
     toast('설정 스크립트 복사됨');
   });
 }
@@ -365,7 +441,8 @@ function copyStep(n, btn) {
   navigator.clipboard.writeText(_STEP_SCRIPTS[n]).then(() => {
     const orig = btn.textContent;
     btn.textContent = '✓ 복사됨';
-    setTimeout(() => btn.textContent = orig, 2000);
+    btn.classList.add('copy-done');
+    setTimeout(() => { btn.textContent = orig; btn.classList.remove('copy-done'); }, 2000);
     toast('복사됨');
   });
 }

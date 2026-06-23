@@ -210,11 +210,11 @@ function sshRow(s) {
     ? `<button onclick="sshDel('${eA(s.alias)}')" title="추가 취소" class="text-slate-300 hover:text-rose-500 transition-colors">
         <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
        </button>`
-    : `<button onclick="openEditDrawer('${eA(s.alias)}')" title="편집" class="text-slate-300 hover:text-sky-500 transition-colors">
+    : `${s.has_password ? `<button onclick="copySshpass('${eA(s.alias)}')" title="sshpass 명령어 복사" class="text-slate-300 hover:text-violet-500 transition-colors">
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"/></svg>
+       </button>` : ''}
+       <button onclick="openEditDrawer('${eA(s.alias)}')" title="편집" class="text-slate-300 hover:text-sky-500 transition-colors">
         <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"/></svg>
-       </button>
-       <button onclick="kmOpen('${eA(s.alias)}','${eA(s.key_path || '')}')" title="키 설정" class="text-slate-300 hover:text-indigo-500 transition-colors">
-        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z"/></svg>
        </button>
        <button onclick="sshDel('${eA(s.alias)}')" title="삭제" class="text-slate-300 hover:text-rose-500 transition-colors">
         <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
@@ -231,17 +231,35 @@ function sshRow(s) {
   </tr>`;
 }
 
+async function copySshpass(alias) {
+  try {
+    const r = await fetch(`/api/ssh/password/${encodeURIComponent(alias)}`);
+    if (!r.ok) { toast('비밀번호 정보 없음', false); return; }
+    const d = await r.json();
+    const cmd = `sshpass -p '${d.password}' ssh ${alias}`;
+    await navigator.clipboard.writeText(cmd);
+    toast('sshpass 명령어 복사됨');
+  } catch(e) {
+    toast('복사 실패', false);
+  }
+}
+
 let drawerDirty = false;
+let editHasPassword = false;
 function _drawerReset() {
-  editAlias = ''; drawerDirty = false; lastAutoHint = '';
+  editAlias = ''; drawerDirty = false; lastAutoHint = ''; editHasPassword = false;
   document.getElementById('drawer-title').textContent = '서버 추가';
   document.getElementById('submit-btn').textContent = '추가';
   const cancelBtn = document.getElementById('drawer-cancel-btn');
   cancelBtn.textContent = '취소';
   cancelBtn.onclick = () => closeDrawer();
+  const pwField = document.getElementById('f-password');
+  pwField.value = ''; pwField.placeholder = '비밀번호 없음';
   document.getElementById('f-import-key-path').value = '';
   document.getElementById('import-key-path-txt').textContent = '';
   document.getElementById('import-key-notice-wrap').classList.add('hidden');
+  document.getElementById('import-src-notice-wrap').classList.add('hidden');
+  document.getElementById('import-src-path-txt').textContent = '';
   document.getElementById('f-import-source-file').value = '';
   document.getElementById('f-import-orig-alias').value = '';
 }
@@ -258,6 +276,10 @@ function openImportDrawer(h) {
   document.querySelector('input[name="port"]').value    = h.port     || '22';
   document.getElementById('f-import-source-file').value = h.source_file || '';
   document.getElementById('f-import-orig-alias').value = h.alias || '';
+  if (h.source_file) {
+    document.getElementById('import-src-path-txt').textContent = h.source_file;
+    document.getElementById('import-src-notice-wrap').classList.remove('hidden');
+  }
   if (h.key_path) {
     document.getElementById('f-import-key-path').value    = h.key_path;
     document.getElementById('import-key-path-txt').textContent = h.key_path;
@@ -298,6 +320,10 @@ function openEditDrawer(alias) {
   fwdOn = !!s.forward_agent;
   document.getElementById('fwd-toggle').classList.toggle('on', fwdOn);
   document.getElementById('fwd-val').value = fwdOn ? 'true' : 'false';
+  editHasPassword = !!s.has_password;
+  const pwField = document.getElementById('f-password');
+  pwField.value = '';
+  pwField.placeholder = s.has_password ? '변경하려면 입력 (비워두면 기존 유지)' : '비밀번호 없음';
   selEnv(s.env);
   updatePreview();
   document.getElementById('drawer').classList.add('open');
@@ -371,22 +397,29 @@ function setKeyMode(m) {
 }
 function submitForm(e) {
   e.preventDefault();
-  if (!selectedEnv) { toast('타입을 선택하세요', false); return; }
   const isEdit = !!editAlias;
-  const proj  = document.getElementById('f-project').value.trim();
-  const host  = document.getElementById('f-host').value.trim();
-  const alias = host || (editAlias || '');
+  const proj     = document.getElementById('f-project').value.trim();
+  const host     = document.getElementById('f-host').value.trim();
+  const alias    = host || (editAlias || '');
+  const hostname = document.querySelector('input[name="hostname"]').value.trim();
+
+  if (!proj)         { toast('Project를 입력해주세요', false); document.getElementById('f-project').focus(); return; }
+  if (!selectedEnv)  { toast('타입을 선택해주세요', false); return; }
+  if (!alias)        { toast('Host를 입력해주세요', false); document.getElementById('f-host').focus(); return; }
+  if (!hostname)     { toast('IP / Hostname을 입력해주세요', false); document.querySelector('input[name="hostname"]').focus(); return; }
+
   const keyFile      = keyMode === 'file' ? (document.getElementById('f-keyfile').files?.[0] || null) : null;
   const keyText      = keyMode === 'text' ? (document.querySelector('textarea[name="key_text"]')?.value?.trim() || '') : '';
   const keyLocalPath = document.getElementById('f-import-key-path').value.trim();
   const importSourceFile = document.getElementById('f-import-source-file').value.trim();
   const importOrigAlias = document.getElementById('f-import-orig-alias').value.trim();
+  const password     = document.getElementById('f-password').value;
   const entry = {
     alias,
     project:        proj,
     env:            selectedEnv,
     host:           host,
-    hostname:       document.querySelector('input[name="hostname"]').value.trim(),
+    hostname:       hostname,
     user:           document.querySelector('input[name="user"]').value.trim(),
     port:           parseInt(document.querySelector('input[name="port"]').value) || 22,
     proxy_jump:     document.getElementById('f-proxy').value,
@@ -400,6 +433,8 @@ function submitForm(e) {
     key_path:       `~/.workit/data/ssh/keys/${selectedEnv}/${alias}.pem`,
     import_source_file: importSourceFile,
     import_orig_alias:  importOrigAlias,
+    password:           password,
+    _editHasPassword:   isEdit ? editHasPassword : false,
   };
   if (isEdit) {
     const orig = servers.find(x => x.alias === editAlias);
@@ -414,7 +449,8 @@ function submitForm(e) {
       entry.proxy_jump    === (orig.proxy_jump    || '') &&
       entry.description   === (orig.description   || '') &&
       entry.forward_agent === !!(orig.forward_agent) &&
-      !hasKeyChange;
+      !hasKeyChange &&
+      !password;
     if (noChange) {
       sshDraft.edits.delete(editAlias);
       _drawerForceClose(); _updateSaveBtn('ssh'); sshRender();
@@ -466,56 +502,64 @@ async function sshApply() {
   const total = sshDraftCount();
   const errs = [];
 
-  // Process staged deletes
-  for (const alias of sshDraft.deletes) {
-    try {
-      const r = await fetch(`/api/ssh/servers/${alias}`, { method: 'DELETE' });
-      if (!r.ok) errs.push(`삭제 실패: ${alias}`);
-    } catch { errs.push(`오류: ${alias}`); }
-  }
-  // Process staged edits
-  for (const [alias, entry] of sshDraft.edits) {
-    const fd = new FormData();
-    fd.append('project', entry.project); fd.append('env', entry.env); fd.append('host', entry.host || entry.alias);
-    fd.append('hostname', entry.hostname); fd.append('user', entry.user); fd.append('port', entry.port);
-    fd.append('proxy_jump', entry.proxy_jump); fd.append('description', entry.description);
-    fd.append('forward_agent', entry.forward_agent ? 'true' : 'false');
-    if (entry.key_mode === 'file' && entry.key_file) fd.append('key_file', entry.key_file);
-    else if (entry.key_mode === 'text' && entry.key_text) fd.append('key_text', entry.key_text);
-    else if (entry.key_local_path) fd.append('local_path', entry.key_local_path);
-    try {
-      const r = await fetch(`/api/ssh/servers/${alias}`, { method: 'PUT', body: fd });
-      if (!r.ok) { const d = await r.json(); errs.push(d.error || `수정 실패: ${alias}`); }
-    } catch { errs.push(`오류: ${alias}`); }
-  }
-  // Process staged adds
-  for (const entry of sshDraft.adds) {
-    const fd = new FormData();
-    fd.append('project', entry.project); fd.append('env', entry.env); fd.append('host', entry.host || entry.alias);
-    fd.append('hostname', entry.hostname); fd.append('user', entry.user); fd.append('port', entry.port);
-    fd.append('proxy_jump', entry.proxy_jump); fd.append('description', entry.description);
-    fd.append('forward_agent', entry.forward_agent ? 'true' : 'false');
-    if (entry.key_mode === 'file' && entry.key_file) fd.append('key_file', entry.key_file);
-    else if (entry.key_mode === 'text' && entry.key_text) fd.append('key_text', entry.key_text);
-    else if (entry.key_local_path) fd.append('local_path', entry.key_local_path);
-    if (entry.import_source_file) fd.append('import_source_file', entry.import_source_file);
-    if (entry.import_orig_alias) fd.append('import_orig_alias', entry.import_orig_alias);
-    try {
-      const r = await fetch('/api/ssh/servers', { method: 'POST', body: fd });
-      if (!r.ok) { const d = await r.json(); errs.push(d.error || '추가 실패'); }
-    } catch { errs.push('추가 오류'); }
-  }
-  // Apply SSH config
   try {
-    const r = await fetch('/api/ssh/apply', { method: 'POST' }), d = await r.json();
-    if (d.ok) { if (!errs.length) toast(total > 0 ? `${total}개 변경사항 저장됨` : d.output); }
-    else errs.push('SSH 설정 적용 실패');
-  } catch { errs.push('SSH 설정 적용 실패'); }
-
-  sshDraft.deletes.clear(); sshDraft.edits.clear(); sshDraft.adds.length = 0;
-  errs.forEach(e => toast(e, false));
-  btn.disabled = false; _updateSaveBtn('ssh');
-  await sshLoad();
+    // Process staged deletes
+    for (const alias of sshDraft.deletes) {
+      try {
+        const r = await _fetchTimeout(`/api/ssh/servers/${alias}`, { method: 'DELETE' });
+        if (!r.ok) errs.push(`삭제 실패: ${alias}`);
+      } catch(e) { errs.push(e?.name === 'AbortError' ? `시간 초과: ${alias}` : `오류: ${alias}`); }
+    }
+    // Process staged edits
+    for (const [alias, entry] of sshDraft.edits) {
+      const fd = new FormData();
+      fd.append('project', entry.project); fd.append('env', entry.env); fd.append('host', entry.host || entry.alias);
+      fd.append('hostname', entry.hostname); fd.append('user', entry.user); fd.append('port', entry.port);
+      fd.append('proxy_jump', entry.proxy_jump); fd.append('description', entry.description);
+      fd.append('forward_agent', entry.forward_agent ? 'true' : 'false');
+      if (entry.password) fd.append('password', entry.password);
+      else if (!entry._editHasPassword) fd.append('password_clear', 'true');
+      if (entry.key_mode === 'file' && entry.key_file) fd.append('key_file', entry.key_file);
+      else if (entry.key_mode === 'text' && entry.key_text) fd.append('key_text', entry.key_text);
+      else if (entry.key_local_path) fd.append('local_path', entry.key_local_path);
+      try {
+        const r = await _fetchTimeout(`/api/ssh/servers/${alias}`, { method: 'PUT', body: fd });
+        if (!r.ok) { const d = await r.json(); errs.push(d.error || `수정 실패: ${alias}`); }
+      } catch(e) { errs.push(e?.name === 'AbortError' ? `시간 초과: ${alias}` : `오류: ${alias}`); }
+    }
+    // Process staged adds
+    for (const entry of sshDraft.adds) {
+      const fd = new FormData();
+      fd.append('project', entry.project); fd.append('env', entry.env); fd.append('host', entry.host || entry.alias);
+      fd.append('hostname', entry.hostname); fd.append('user', entry.user); fd.append('port', entry.port);
+      fd.append('proxy_jump', entry.proxy_jump); fd.append('description', entry.description);
+      fd.append('forward_agent', entry.forward_agent ? 'true' : 'false');
+      if (entry.password) fd.append('password', entry.password);
+      if (entry.key_mode === 'file' && entry.key_file) fd.append('key_file', entry.key_file);
+      else if (entry.key_mode === 'text' && entry.key_text) fd.append('key_text', entry.key_text);
+      else if (entry.key_local_path) fd.append('local_path', entry.key_local_path);
+      if (entry.import_source_file) fd.append('import_source_file', entry.import_source_file);
+      if (entry.import_orig_alias) fd.append('import_orig_alias', entry.import_orig_alias);
+      try {
+        const r = await _fetchTimeout('/api/ssh/servers', { method: 'POST', body: fd });
+        if (!r.ok) { const d = await r.json(); errs.push(d.error || '추가 실패'); }
+      } catch(e) { errs.push(e?.name === 'AbortError' ? '시간 초과' : '추가 오류'); }
+    }
+    // Apply SSH config
+    try {
+      const r = await _fetchTimeout('/api/ssh/apply', { method: 'POST' }), d = await r.json();
+      if (d.ok) { if (!errs.length) toast(total > 0 ? `${total}개 변경사항 저장됨` : d.output); }
+      else errs.push('SSH 설정 적용 실패');
+    } catch(e) { errs.push(e?.name === 'AbortError' ? '서버 응답 시간 초과' : 'SSH 설정 적용 실패'); }
+  } catch (err) {
+    console.error(err);
+    errs.push(`예상치 못한 오류: ${err.message}`);
+  } finally {
+    sshDraft.deletes.clear(); sshDraft.edits.clear(); sshDraft.adds.length = 0;
+    errs.forEach(e => toast(e, false));
+    btn.disabled = false; _updateSaveBtn('ssh');
+    await sshLoad();
+  }
 }
 
 // Key modal

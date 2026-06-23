@@ -393,12 +393,12 @@ function kubeRenderParsed() {
       <div class="p-4 space-y-3" id="kube-card-${i}">
         <div class="grid grid-cols-2 gap-3">
           <div>
-            <label class="lbl">Project <span class="font-normal text-slate-400">(대분류)</span></label>
+            <label class="lbl">Project <span class="text-red-400">*</span> <span class="font-normal text-slate-400">(대분류)</span></label>
             <input value="${esc(c.project||'')}" oninput="kubeField(${i},'project',this.value)"
               class="inp text-sm" placeholder="hyundai-capital">
           </div>
           <div>
-            <label class="lbl">Env <span class="font-normal text-slate-400">(소분류)</span></label>
+            <label class="lbl">Env <span class="text-red-400">*</span> <span class="font-normal text-slate-400">(소분류)</span></label>
             <div class="grid grid-cols-4 gap-1">
               ${['dev','test','stg','prd'].map(e => `<button type="button" onclick="kubeEnv(${i},'${e}')" id="kube-ep-${i}-${e}"
                 class="env-pill text-[11px] py-1 ${(c.env||'')=== e ? 'sel-'+e : ''}">${e}</button>`).join('')}
@@ -454,6 +454,13 @@ function kubeEnv(i, env) {
 
 function kubeAddParsed() {
   const selected = kubeParsed.filter(c => c._selected);
+
+  for (let i = 0; i < selected.length; i++) {
+    const c = selected[i];
+    const label = selected.length > 1 ? `Context ${i + 1}: ` : '';
+    if (!c.project?.trim()) { toast(`${label}Project를 입력해주세요`, false); return; }
+    if (!c.env?.trim())     { toast(`${label}소분류(Env)를 선택해주세요`, false); return; }
+  }
 
   if (kubeEditId) {
     const addIdx = kubeDraft.adds.findIndex(a => a._draftId === kubeEditId);
@@ -518,47 +525,52 @@ async function kubeApply() {
   btn.innerHTML = `<svg class="w-4 h-4 spin" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>`;
   const errs = [];
 
-  // Process staged deletes
-  for (const id of kubeDraft.deletes) {
-    try {
-      const r = await fetch(`/api/kube/contexts/${id}`, { method: 'DELETE' });
-      if (!r.ok) errs.push('삭제 실패');
-    } catch { errs.push('네트워크 오류'); }
-  }
-  // Process staged edits
-  for (const [id, entry] of kubeDraft.edits) {
-    const payload = { ...entry }; delete payload._draftState; delete payload._selected;
-    if (payload._cluster) payload._cluster = { ...payload._cluster, server: entry.server };
-    try {
-      const r = await fetch(`/api/kube/contexts/${id}`, {
-        method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload)
-      });
-      if (!r.ok) { const d = await r.json(); errs.push(d.error || '수정 실패'); }
-    } catch { errs.push('네트워크 오류'); }
-  }
-  // Process staged adds
-  for (const entry of kubeDraft.adds) {
-    const payload = { ...entry }; delete payload._draftId; delete payload._draftState; delete payload._selected;
-    if (payload._cluster) payload._cluster = { ...payload._cluster, server: entry.server };
-    try {
-      const r = await fetch('/api/kube/contexts', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload)
-      });
-      if (!r.ok) { const d = await r.json(); errs.push(d.error || '추가 실패'); }
-    } catch { errs.push('네트워크 오류'); }
-  }
-  // Write kube config files
   try {
-    const r = await fetch('/api/kube/apply', { method: 'POST' });
-    const d = await r.json();
-    if (!d.ok) errs.push('파일 저장 실패');
-    else if (!errs.length) toast(total > 0 ? `${total}개 변경사항 저장됨` : d.output);
-  } catch { errs.push('파일 저장 실패'); }
-
-  kubeDraft.deletes.clear(); kubeDraft.edits.clear(); kubeDraft.adds.length = 0;
-  errs.forEach(e => toast(e, false));
-  btn.disabled = false; _updateSaveBtn('kube');
-  await kubeLoad();
+    // Process staged deletes
+    for (const id of kubeDraft.deletes) {
+      try {
+        const r = await _fetchTimeout(`/api/kube/contexts/${id}`, { method: 'DELETE' });
+        if (!r.ok) errs.push('삭제 실패');
+      } catch(e) { errs.push(e?.name === 'AbortError' ? '시간 초과' : '네트워크 오류'); }
+    }
+    // Process staged edits
+    for (const [id, entry] of kubeDraft.edits) {
+      const payload = { ...entry }; delete payload._draftState; delete payload._selected;
+      if (payload._cluster) payload._cluster = { ...payload._cluster, server: entry.server };
+      try {
+        const r = await _fetchTimeout(`/api/kube/contexts/${id}`, {
+          method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload)
+        });
+        if (!r.ok) { const d = await r.json(); errs.push(d.error || '수정 실패'); }
+      } catch(e) { errs.push(e?.name === 'AbortError' ? '시간 초과' : '네트워크 오류'); }
+    }
+    // Process staged adds
+    for (const entry of kubeDraft.adds) {
+      const payload = { ...entry }; delete payload._draftId; delete payload._draftState; delete payload._selected;
+      if (payload._cluster) payload._cluster = { ...payload._cluster, server: entry.server };
+      try {
+        const r = await _fetchTimeout('/api/kube/contexts', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload)
+        });
+        if (!r.ok) { const d = await r.json(); errs.push(d.error || '추가 실패'); }
+      } catch(e) { errs.push(e?.name === 'AbortError' ? '시간 초과' : '네트워크 오류'); }
+    }
+    // Write kube config files
+    try {
+      const r = await _fetchTimeout('/api/kube/apply', { method: 'POST' });
+      const d = await r.json();
+      if (!d.ok) errs.push('파일 저장 실패');
+      else if (!errs.length) toast(total > 0 ? `${total}개 변경사항 저장됨` : d.output);
+    } catch(e) { errs.push(e?.name === 'AbortError' ? '서버 응답 시간 초과' : '파일 저장 실패'); }
+  } catch (err) {
+    console.error(err);
+    errs.push(`예상치 못한 오류: ${err.message}`);
+  } finally {
+    kubeDraft.deletes.clear(); kubeDraft.edits.clear(); kubeDraft.adds.length = 0;
+    errs.forEach(e => toast(e, false));
+    btn.disabled = false; _updateSaveBtn('kube');
+    await kubeLoad();
+  }
 }
 
 let _unsavedCb = null;

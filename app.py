@@ -28,6 +28,7 @@ SSH_CONFIG       = Path.home() / ".ssh" / "config"
 SSH_WORKIT_DIR   = DATA_DIR / "ssh"                         # ssh data root: ~/.workit/data/ssh/
 SSH_CONFS_DIR    = DATA_DIR / "ssh" / "configs"             # conf files: ~/.workit/data/ssh/configs/*.conf
 KEYS_ROOT        = DATA_DIR / "ssh" / "keys"                # key files: ~/.workit/data/ssh/keys/
+SSH_PASSWORDS    = DATA_DIR / "ssh" / "passwords.json"      # plaintext passwords (chmod 600)
 ENV_ORDER        = ["dev", "test", "stg", "prd"]
 KUBE_JSON        = DATA_DIR / "kube" / "contexts.json"
 KUBE_CONFIG      = Path.home() / ".kube" / "config"   # system kubeconfig — not modified
@@ -39,6 +40,13 @@ app = Flask(
     template_folder=str(BASE_DIR / "templates"),
     static_folder=str(BASE_DIR / "static"),
 )
+
+@app.after_request
+def _no_cache_api(resp):
+    if request.path.startswith("/api/"):
+        resp.headers["Cache-Control"] = "no-store, no-cache, must-revalidate"
+        resp.headers["Pragma"] = "no-cache"
+    return resp
 
 _DEFAULT_SSH_YAML = """\
 version: "1.0"
@@ -138,6 +146,23 @@ def _migrate_file(src: Path, dst: Path):
 
 
 # ═══ SSH helpers ══════════════════════════════════════════════
+
+def _load_ssh_passwords():
+    if not SSH_PASSWORDS.exists():
+        return {}
+    try:
+        with open(SSH_PASSWORDS) as f:
+            return json.load(f) or {}
+    except Exception:
+        return {}
+
+
+def _save_ssh_passwords(pw):
+    SSH_PASSWORDS.parent.mkdir(parents=True, exist_ok=True)
+    with open(SSH_PASSWORDS, "w") as f:
+        json.dump(pw, f, indent=2)
+    SSH_PASSWORDS.chmod(0o600)
+
 
 def _load_ssh():
     with open(SSH_YAML) as f:
@@ -550,6 +575,29 @@ def settings_set():
     return jsonify(data)
 
 
+@app.route("/api/setup_status")
+def setup_status():
+    home = Path.home()
+    ssh_keys_ok = all(
+        (home / ".workit" / "data" / "ssh" / "keys" / env).is_dir()
+        for env in ("dev", "test", "stg", "prd")
+    )
+    ssh_conf_ok = False
+    ssh_config_path = home / ".ssh" / "config"
+    if ssh_config_path.exists():
+        ssh_conf_ok = "~/.workit/data/ssh/configs/" in ssh_config_path.read_text()
+    step1 = ssh_keys_ok and ssh_conf_ok
+
+    step2 = (home / ".workit" / "data" / "kube" / "configs").is_dir()
+
+    step3 = False
+    zshrc = home / ".zshrc"
+    if zshrc.exists():
+        step3 = "_load_kubeconfigs" in zshrc.read_text()
+
+    return jsonify({"step1": step1, "step2": step2, "step3": step3})
+
+
 @app.route("/api/check_update")
 def check_update():
     try:
@@ -607,6 +655,9 @@ def ssh_list():
     data     = _load_ssh()
     d        = data.get("defaults", {})
     servers  = [_enrich(s, d) for s in data.get("servers", [])]
+    passwords = _load_ssh_passwords()
+    for s in servers:
+        s["has_password"] = bool(passwords.get(s["alias"]))
     registered_aliases = {s["alias"] for s in servers}
     unmanaged, includes = _parse_unmanaged_ssh_hosts(registered_aliases)
     return jsonify({
@@ -633,6 +684,7 @@ def ssh_add():
     key_lpath   = request.form.get("local_path",    "").strip()
     import_source_file = request.form.get("import_source_file", "").strip()
     import_orig_alias  = request.form.get("import_orig_alias",  "").strip()
+    password           = request.form.get("password",           "")   # keep spaces
 
     if not all([project, env, host, hostname]):
         return jsonify({"error": "project, env, host, hostname are required"}), 400
@@ -687,6 +739,10 @@ def ssh_add():
     servers.append(new)
     data["servers"] = servers
     _save_ssh(data)
+    if password:
+        pw = _load_ssh_passwords()
+        pw[host] = password
+        _save_ssh_passwords(pw)
     return jsonify(_enrich(new, d)), 201
 
 
@@ -704,6 +760,8 @@ def ssh_update(a):
     key_file    = request.files.get("key_file")
     key_text    = request.form.get("key_text",      "").strip()
     key_lpath   = request.form.get("local_path",    "").strip()
+    password    = request.form.get("password",      "")   # keep spaces; empty = keep existing
+    password_clear = request.form.get("password_clear", "") == "true"
 
     if not all([project, env, host, hostname]):
         return jsonify({"error": "project, env, host, hostname are required"}), 400
@@ -758,6 +816,19 @@ def ssh_update(a):
     servers[target_idx] = updated
     data["servers"]     = servers
     _save_ssh(data)
+    pw = _load_ssh_passwords()
+    if password:
+        if new_alias != a:
+            pw.pop(a, None)
+        pw[new_alias] = password
+        _save_ssh_passwords(pw)
+    elif password_clear:
+        pw.pop(a, None)
+        pw.pop(new_alias, None)
+        _save_ssh_passwords(pw)
+    elif new_alias != a and a in pw:
+        pw[new_alias] = pw.pop(a)
+        _save_ssh_passwords(pw)
     return jsonify(_enrich(updated, d))
 
 
@@ -769,7 +840,20 @@ def ssh_delete(a):
     if len(data["servers"]) == len(original):
         return jsonify({"error": "not found"}), 404
     _save_ssh(data)
+    pw = _load_ssh_passwords()
+    if a in pw:
+        del pw[a]
+        _save_ssh_passwords(pw)
     return jsonify({"ok": True})
+
+
+@app.route("/api/ssh/password/<path:a>")
+def ssh_get_password(a):
+    pw = _load_ssh_passwords()
+    p  = pw.get(a)
+    if not p:
+        return jsonify({"error": "비밀번호가 설정되지 않았습니다"}), 404
+    return jsonify({"password": p, "alias": a})
 
 
 @app.route("/api/ssh/unmanaged/<path:alias>", methods=["DELETE"])
@@ -954,17 +1038,15 @@ def _import_contexts(data, clusters, users, ctx_list, known):
 
 @app.route("/api/kube/contexts")
 def kube_list():
-    data    = _load_kube()
-    known   = {c["context_name"] for c in data.get("contexts", [])}
-    changed = False
+    data = _load_kube()
 
-    # Always re-sync from ~/.kube/config — system-managed contexts always visible
-    if KUBE_CONFIG.exists():
-        clusters, users, ctx_list = _parse_kubeconfig(KUBE_CONFIG.read_text())
-        if ctx_list is not None:
-            changed |= _import_contexts(data, clusters, users, ctx_list, known)
+    # Remove contexts with empty project (legacy auto-import artifacts from ~/.kube/config)
+    orig_contexts = data.get("contexts", [])
+    data["contexts"] = [c for c in orig_contexts if c.get("project")]
+    changed = len(data["contexts"]) != len(orig_contexts)
 
-    # Also import from ~/.kube/configs/*.yaml (workit-managed files)
+    # Only import from Workit-managed kubeconfig files (NOT ~/.kube/config — those show via /api/kube/system)
+    known = {c["context_name"] for c in data.get("contexts", [])}
     if KUBE_CONFIGS_DIR.exists():
         for fpath in sorted(KUBE_CONFIGS_DIR.glob("*.yaml")):
             clusters, users, ctx_list = _parse_kubeconfig(fpath.read_text())

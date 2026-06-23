@@ -11,7 +11,7 @@
       darkMode: 'class'
     }
   </script>
-  <link rel="stylesheet" href="/static/app.css">
+  <link rel="stylesheet" href="/static/app.css?v={{ version }}">
   <script>
     /* Apply saved theme before first paint — value injected by Flask, no flash */
     if ('{{ theme }}' === 'dark') {
@@ -152,12 +152,17 @@
 
 {% include 'drawers_modals.html' %}
 
+<!-- Toast notification -->
+<div id="toast">
+  <div id="toast-inner" class="px-5 py-2.5 rounded-full text-sm font-semibold text-white shadow-lg"></div>
+</div>
+
 <!-- Load scripts globally -->
-<script src="/static/js/common.js"></script>
-<script src="/static/js/ssh.js"></script>
-<script src="/static/js/kube.js"></script>
-<script src="/static/js/accounts.js"></script>
-<script src="/static/js/docs.js"></script>
-<script src="/static/js/init.js"></script>
+<script src="/static/js/common.js?v={{ version }}"></script>
+<script src="/static/js/ssh.js?v={{ version }}"></script>
+<script src="/static/js/kube.js?v={{ version }}"></script>
+<script src="/static/js/accounts.js?v={{ version }}"></script>
+<script src="/static/js/docs.js?v={{ version }}"></script>
+<script src="/static/js/init.js?v={{ version }}"></script>
 </body>
 </html>
