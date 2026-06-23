@@ -7,7 +7,7 @@ from collections import defaultdict
 from datetime import datetime
 import yaml, json, os, sys, shutil, uuid, re, urllib.request, webbrowser
 
-APP_VERSION = "1.0.1"
+APP_VERSION = "1.0.2"
 
 # When bundled with PyInstaller, templates/static live in sys._MEIPASS.
 # Data always lives in ~/.workit/data/ (user-writable, persists across updates).
