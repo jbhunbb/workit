@@ -406,3 +406,16 @@ body.dark .font-scale-opt.active { background: #1e1b4b !important; color: #818cf
 body.dark #font-scale-menu { background: #1e293b !important; border-color: var(--border-color) !important; }
 body.dark .font-scale-opt { color: var(--text-muted); }
 body.dark .font-scale-opt:hover { background: #334155 !important; color: #e2e8f0 !important; }
+
+/* ── Text Selection Override (Allows copy/selection in inputs, code, and Docs) ── */
+#docs-detail-panel,
+#docs-detail-panel *,
+.md-body,
+.md-body *,
+input,
+textarea,
+pre,
+code {
+  -webkit-user-select: text !important;
+  user-select: text !important;
+}
