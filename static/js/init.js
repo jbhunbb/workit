@@ -16,10 +16,29 @@ fetch('/api/settings').then(r => r.json()).then(d => {
   if (d.font_scale) { document.body.style.zoom = d.font_scale; document.documentElement.style.setProperty('--bz', d.font_scale); _updateFontScaleUI(d.font_scale); }
 }).catch(() => {});
 
-// Command + R / Ctrl + R 새로고침 지원
+// Command + R / Ctrl + R 새로고침 및 Cmd + +/- 크기 조절 단축키 지원
 window.addEventListener('keydown', (e) => {
+  const isZoomIn = (e.key === '=' || e.key === '+' || e.code === 'Equal' || e.code === 'NumpadAdd');
+  const isZoomOut = (e.key === '-' || e.key === '_' || e.code === 'Minus' || e.code === 'NumpadSubtract');
+  const isZoomReset = (e.key === '0' || e.code === 'Digit0' || e.code === 'Numpad0');
+
   if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'r') {
     e.preventDefault();
     window.location.reload();
   }
-});
+  else if ((e.metaKey || e.ctrlKey) && isZoomIn) {
+    e.preventDefault();
+    e.stopPropagation();
+    changeFontScale(0.05);
+  }
+  else if ((e.metaKey || e.ctrlKey) && isZoomOut) {
+    e.preventDefault();
+    e.stopPropagation();
+    changeFontScale(-0.05);
+  }
+  else if ((e.metaKey || e.ctrlKey) && isZoomReset) {
+    e.preventDefault();
+    e.stopPropagation();
+    setFontScale(1.0);
+  }
+}, { capture: true });

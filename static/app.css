@@ -139,7 +139,7 @@ body.dark tr:hover .copy-btn { color: #64748b; }
 body.dark .copy-btn:hover { color: #818cf8 !important; background: rgba(129,140,248,.12); }
 
 /* ── Project Header ── */
-.proj-hdr { background: var(--bg-header); position: relative; }
+.proj-hdr { background: #1e293b; position: relative; }
 .proj-hdr::before {
   content: ''; position: absolute; left: 0; top: 0; bottom: 0; width: 3px;
   background: linear-gradient(180deg, #6366f1, #818cf8);

@@ -185,9 +185,16 @@ document.addEventListener('click', e => {
 function setFontScale(scale) {
   document.body.style.zoom = scale;
   document.documentElement.style.setProperty('--bz', scale);
-  document.getElementById('font-scale-menu').classList.add('hidden');
+  const menu = document.getElementById('font-scale-menu');
+  if (menu) menu.classList.add('hidden');
   _updateFontScaleUI(scale);
   fetch('/api/settings', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({font_scale: scale})}).catch(()=>{});
+}
+function changeFontScale(delta) {
+  let scale = parseFloat(document.body.style.zoom) || 1.0;
+  scale += delta;
+  scale = Math.max(0.5, Math.min(2.0, parseFloat(scale.toFixed(2))));
+  setFontScale(scale);
 }
 function _updateFontScaleUI(scale) {
   document.querySelectorAll('.font-scale-opt').forEach(b => {

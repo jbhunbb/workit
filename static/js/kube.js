@@ -343,10 +343,17 @@ async function kubeParse() {
   try {
     const r = await fetch('/api/kube/parse', { method: 'POST', body: fd });
     const d = await r.json();
-    if (!r.ok) { toast(d.error || '파싱 실패', false); return; }
+    if (!r.ok) {
+      alert("YAML 파싱 실패:\n" + (d.error || '파싱 실패'));
+      toast(d.error || '파싱 실패', false);
+      return;
+    }
     kubeParsed = d.contexts.map(c => ({ ...c, _selected: true }));
     kubeShowParsed();
-  } catch { toast('네트워크 오류', false); }
+  } catch {
+    alert("네트워크 오류로 파싱에 실패했습니다.");
+    toast('네트워크 오류', false);
+  }
   finally { btn.disabled = false; btn.textContent = '파싱하기'; }
 }
 
